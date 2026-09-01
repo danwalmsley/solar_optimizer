@@ -103,6 +103,15 @@ central_config_schema = vol.Schema(
                 mode=selector.NumberSelectorMode.BOX,
             )
         ),
+        vol.Optional(CONF_BATTERY_CHARGE_RESERVE_START_SOC): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
+                max=99,
+                step=1,
+                unit_of_measurement="%",
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        ),
         vol.Optional(
             CONF_MINIMUM_EXPORT_POWER,
             default=DEFAULT_MINIMUM_EXPORT_POWER,

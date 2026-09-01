@@ -87,6 +87,7 @@ CONF_BATTERY_POWER_STRATEGY = "battery_power_strategy"
 CONF_BATTERY_BUDGET_START_SOC = "battery_budget_start_soc"
 CONF_BATTERY_BUDGET_STOP_SOC = "battery_budget_stop_soc"
 CONF_MINIMUM_BATTERY_CHARGE_POWER = "minimum_battery_charge_power"
+CONF_BATTERY_CHARGE_RESERVE_START_SOC = "battery_charge_reserve_start_soc"
 CONF_MINIMUM_EXPORT_POWER = "minimum_export_power"
 CONF_DECISION_REVERSAL_HOLD_SEC = "decision_reversal_hold_sec"
 CONF_MAX_ON_TIME_PER_DAY_MIN = "max_on_time_per_day_min"
@@ -259,3 +260,68 @@ class InvalidTime(HomeAssistantError):
 
 class InvalidBatteryBudget(HomeAssistantError):
     """Error to indicate invalid battery budget hysteresis thresholds."""
+
+
+class InvalidBatteryChargeReserve(HomeAssistantError):
+    """Error to indicate invalid battery charge-reserve taper thresholds."""
+
+
+def battery_charge_reserve_breakpoints(
+    start_soc: float,
+    close_soc: float,
+    open_soc: float,
+) -> list[float]:
+    """Return SOC boundaries for the stepped charge-reserve curve.
+
+    The curve advances in 10 percentage-point steps up to the budget-close SOC,
+    then in 5 percentage-point steps up to the budget-open SOC.
+    """
+    points = [float(start_soc)]
+
+    point = float(start_soc) + 10
+    while point < close_soc:
+        points.append(point)
+        point += 10
+
+    if close_soc > start_soc and close_soc < open_soc and points[-1] != close_soc:
+        points.append(float(close_soc))
+
+    point = float(close_soc) + 5
+    while point < open_soc:
+        points.append(point)
+        point += 5
+
+    if points[-1] != open_soc:
+        points.append(float(open_soc))
+
+    return points
+
+
+def battery_charge_reserve_power(
+    maximum_power: float,
+    start_soc: float | None,
+    close_soc: float,
+    open_soc: float,
+    battery_soc: float | None,
+) -> float:
+    """Calculate the stepped minimum charging reserve for the current SOC.
+
+    A missing taper start preserves the legacy fixed-reserve behavior. Missing
+    SOC data conservatively retains the configured maximum reserve.
+    """
+    maximum_power = max(0.0, float(maximum_power))
+    if start_soc is None:
+        return maximum_power
+    if battery_soc is None or battery_soc <= start_soc:
+        return maximum_power
+    if battery_soc >= open_soc:
+        return 0.0
+
+    boundaries = battery_charge_reserve_breakpoints(
+        start_soc, close_soc, open_soc
+    )
+    active_boundary = max(point for point in boundaries if point <= battery_soc)
+    reserve = maximum_power * (open_soc - active_boundary) / (
+        open_soc - start_soc
+    )
+    return max(0.0, reserve)

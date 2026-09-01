@@ -30,7 +30,8 @@
                     "battery_power_strategy": "Battery power strategy",
                     "battery_budget_start_soc": "Open battery budget at SOC",
                     "battery_budget_stop_soc": "Close battery budget at SOC",
-                    "minimum_battery_charge_power": "Minimum battery charging power",
+                    "minimum_battery_charge_power": "Maximum charge-priority reserve",
+                    "battery_charge_reserve_start_soc": "Charge-priority taper starts at SOC",
                     "minimum_export_power": "Minimum export reserve",
                     "decision_reversal_hold_sec": "Opposite decision hold",
                     "raz_time": "Reset counter time"
@@ -49,11 +50,16 @@
                     "battery_power_strategy": "Existing behavior retains the upstream optimizer. Charge battery first preserves the configured minimum charging rate. Charge first with battery budget also lets an already-running flexible load use the battery after the upper SOC threshold is reached, until the lower threshold is reached.",
                     "battery_budget_start_soc": "Upper SOC threshold that opens the battery budget. This must be greater than the close threshold.",
                     "battery_budget_stop_soc": "Lower SOC threshold that closes the battery budget and prevents further flexible-load battery discharge.",
-                    "minimum_battery_charge_power": "Minimum charging rate to preserve while the battery budget is closed. Flexible loads may reduce battery charging down to this value, but cannot reduce it further or discharge the battery.",
+                    "minimum_battery_charge_power": "Maximum charging reserve at and below the taper-start SOC. This remains a fixed minimum when no taper-start SOC is supplied.",
+                    "battery_charge_reserve_start_soc": "Optional SOC where the full reserve applies. Above this value the minimum reserve falls in 10% SOC steps, then 5% steps between the close and open battery-budget thresholds. Leave empty to retain the fixed reserve.",
                     "minimum_export_power": "Extra real grid export required before flexible loads can use surplus while the battery budget is closed.",
                     "decision_reversal_hold_sec": "Seconds after an optimizer on/off command during which the opposite command is suppressed, allowing inverter and sensor readings to settle. The first decision and repeated decisions in the same direction remain immediate. Set to 0 to disable.",
                     "raz_time": "Time to reset active time counters. Should be before first exposure to sunlight but not too early to allow enough time for night activation"
                 }
+            },
+            "battery_reserve_review": {
+                "title": "Review battery charging reserve",
+                "description": "The optimizer will preserve the following minimum battery charging power while flexible loads are running. These values are minimum targets, not charging caps.\n\n{battery_reserve_curve}"
             },
             "device": {
                 "title": "Device parameters",
@@ -142,7 +148,8 @@
         },
         "error": {
             "format_time_invalid": "Format of time should be HH:MM",
-            "battery_budget_invalid": "The close SOC must be lower than the open SOC"
+            "battery_budget_invalid": "The close SOC must be lower than the open SOC",
+            "battery_charge_reserve_invalid": "The taper-start SOC must be lower than the close and open battery-budget thresholds"
         }
     },
     "options": {
@@ -175,7 +182,8 @@
                     "battery_power_strategy": "Battery power strategy",
                     "battery_budget_start_soc": "Open battery budget at SOC",
                     "battery_budget_stop_soc": "Close battery budget at SOC",
-                    "minimum_battery_charge_power": "Minimum battery charging power",
+                    "minimum_battery_charge_power": "Maximum charge-priority reserve",
+                    "battery_charge_reserve_start_soc": "Charge-priority taper starts at SOC",
                     "minimum_export_power": "Minimum export reserve",
                     "decision_reversal_hold_sec": "Opposite decision hold",
                     "raz_time": "Reset counter time"
@@ -194,11 +202,16 @@
                     "battery_power_strategy": "Existing behavior retains the upstream optimizer. Charge battery first preserves the configured minimum charging rate. Charge first with battery budget also lets an already-running flexible load use the battery after the upper SOC threshold is reached, until the lower threshold is reached.",
                     "battery_budget_start_soc": "Upper SOC threshold that opens the battery budget. This must be greater than the close threshold.",
                     "battery_budget_stop_soc": "Lower SOC threshold that closes the battery budget and prevents further flexible-load battery discharge.",
-                    "minimum_battery_charge_power": "Minimum charging rate to preserve while the battery budget is closed. Flexible loads may reduce battery charging down to this value, but cannot reduce it further or discharge the battery.",
+                    "minimum_battery_charge_power": "Maximum charging reserve at and below the taper-start SOC. This remains a fixed minimum when no taper-start SOC is supplied.",
+                    "battery_charge_reserve_start_soc": "Optional SOC where the full reserve applies. Above this value the minimum reserve falls in 10% SOC steps, then 5% steps between the close and open battery-budget thresholds. Leave empty to retain the fixed reserve.",
                     "minimum_export_power": "Extra real grid export required before flexible loads can use surplus while the battery budget is closed.",
                     "decision_reversal_hold_sec": "Seconds after an optimizer on/off command during which the opposite command is suppressed, allowing inverter and sensor readings to settle. The first decision and repeated decisions in the same direction remain immediate. Set to 0 to disable.",
                     "raz_time": "Time to reset active time counters. Should be before first exposure to sunlight but not too early to allow enough time for night activation"
                 }
+            },
+            "battery_reserve_review": {
+                "title": "Review battery charging reserve",
+                "description": "The optimizer will preserve the following minimum battery charging power while flexible loads are running. These values are minimum targets, not charging caps.\n\n{battery_reserve_curve}"
             },
             "device": {
                 "title": "Device parameters",
@@ -287,7 +300,8 @@
         },
         "error": {
             "format_time_invalid": "Format of time should be HH:MM",
-            "battery_budget_invalid": "The close SOC must be lower than the open SOC"
+            "battery_budget_invalid": "The close SOC must be lower than the open SOC",
+            "battery_charge_reserve_invalid": "The taper-start SOC must be lower than the close and open battery-budget thresholds"
         }
     },
     "selector": {
