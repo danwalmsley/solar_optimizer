@@ -92,6 +92,18 @@ central_config_schema = vol.Schema(
             )
         ),
         vol.Optional(
+            CONF_MINIMUM_BATTERY_CHARGE_POWER,
+            default=DEFAULT_MINIMUM_BATTERY_CHARGE_POWER,
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
+                max=10000,
+                step=10,
+                unit_of_measurement="W",
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        ),
+        vol.Optional(
             CONF_MINIMUM_EXPORT_POWER,
             default=DEFAULT_MINIMUM_EXPORT_POWER,
         ): selector.NumberSelector(
