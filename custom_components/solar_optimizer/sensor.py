@@ -89,6 +89,9 @@ async def async_setup_entry(
         entity14 = SolarOptimizerSensorEntity(
             coordinator, hass, "effective_battery_charge_reserve_power"
         )
+        entity15 = SolarOptimizerSensorEntity(
+            coordinator, hass, "power_deficit_confirmation_sec"
+        )
 
         async_add_entities(
             [
@@ -106,6 +109,7 @@ async def async_setup_entry(
                 entity12,
                 entity13,
                 entity14,
+                entity15,
             ],
             False,
         )
@@ -198,7 +202,10 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             "effective_battery_charge_reserve_power",
         ):
             return "mdi:battery-arrow-up"
-        elif self.idx == "decision_reversal_hold_sec":
+        elif self.idx in (
+            "decision_reversal_hold_sec",
+            "power_deficit_confirmation_sec",
+        ):
             return "mdi:timer-lock"
         elif self.idx == "battery_power_strategy":
             return "mdi:battery-sync"
@@ -211,14 +218,22 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             return SensorDeviceClass.MONETARY
         elif self.idx == "battery_soc":
             return SensorDeviceClass.BATTERY
-        elif self.idx in ("battery_power_strategy", "decision_reversal_hold_sec"):
+        elif self.idx in (
+            "battery_power_strategy",
+            "decision_reversal_hold_sec",
+            "power_deficit_confirmation_sec",
+        ):
             return None
         else:
             return SensorDeviceClass.POWER
 
     @property
     def state_class(self) -> SensorStateClass | None:
-        if self.idx in ("battery_power_strategy", "decision_reversal_hold_sec"):
+        if self.idx in (
+            "battery_power_strategy",
+            "decision_reversal_hold_sec",
+            "power_deficit_confirmation_sec",
+        ):
             return None
         elif self.device_class in (SensorDeviceClass.POWER, SensorDeviceClass.BATTERY):
             return SensorStateClass.MEASUREMENT
@@ -233,7 +248,10 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             return "%"
         elif self.idx == "battery_power_strategy":
             return None
-        elif self.idx == "decision_reversal_hold_sec":
+        elif self.idx in (
+            "decision_reversal_hold_sec",
+            "power_deficit_confirmation_sec",
+        ):
             return UnitOfTime.SECONDS
         else:
             return UnitOfPower.WATT

@@ -139,6 +139,18 @@ central_config_schema = vol.Schema(
                 mode=selector.NumberSelectorMode.BOX,
             )
         ),
+        vol.Optional(
+            CONF_POWER_DEFICIT_CONFIRMATION_SEC,
+            default=DEFAULT_POWER_DEFICIT_CONFIRMATION_SEC,
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
+                max=300,
+                step=1,
+                unit_of_measurement="s",
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        ),
         vol.Optional(CONF_RAZ_TIME, default=DEFAULT_RAZ_TIME): str,
     }
 )

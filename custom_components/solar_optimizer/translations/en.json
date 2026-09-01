@@ -34,6 +34,7 @@
                     "battery_charge_reserve_start_soc": "Charge-priority taper starts at SOC",
                     "minimum_export_power": "Minimum export reserve",
                     "decision_reversal_hold_sec": "Opposite decision hold",
+                    "power_deficit_confirmation_sec": "Power deficit confirmation delay",
                     "raz_time": "Reset counter time"
                 },
                 "data_description": {
@@ -54,6 +55,7 @@
                     "battery_charge_reserve_start_soc": "SOC where the full reserve applies. Above this value the minimum reserve falls in 10% SOC steps, then 5% steps between the close and open battery-budget thresholds.",
                     "minimum_export_power": "Extra real grid export required before flexible loads can use surplus while the battery budget is closed.",
                     "decision_reversal_hold_sec": "Seconds after an optimizer on/off command during which the opposite command is suppressed, allowing inverter and sensor readings to settle. The first decision and repeated decisions in the same direction remain immediate. Set to 0 to disable.",
+                    "power_deficit_confirmation_sec": "Seconds that an insufficient-power decision must persist before an already-running, still-usable device is stopped. Recovery cancels the pending stop. Safety and usability shutdowns remain immediate. Set to 0 to disable.",
                     "raz_time": "Time to reset active time counters. Should be before first exposure to sunlight but not too early to allow enough time for night activation"
                 }
             },
@@ -186,6 +188,7 @@
                     "battery_charge_reserve_start_soc": "Charge-priority taper starts at SOC",
                     "minimum_export_power": "Minimum export reserve",
                     "decision_reversal_hold_sec": "Opposite decision hold",
+                    "power_deficit_confirmation_sec": "Power deficit confirmation delay",
                     "raz_time": "Reset counter time"
                 },
                 "data_description": {
@@ -206,6 +209,7 @@
                     "battery_charge_reserve_start_soc": "SOC where the full reserve applies. Above this value the minimum reserve falls in 10% SOC steps, then 5% steps between the close and open battery-budget thresholds.",
                     "minimum_export_power": "Extra real grid export required before flexible loads can use surplus while the battery budget is closed.",
                     "decision_reversal_hold_sec": "Seconds after an optimizer on/off command during which the opposite command is suppressed, allowing inverter and sensor readings to settle. The first decision and repeated decisions in the same direction remain immediate. Set to 0 to disable.",
+                    "power_deficit_confirmation_sec": "Seconds that an insufficient-power decision must persist before an already-running, still-usable device is stopped. Recovery cancels the pending stop. Safety and usability shutdowns remain immediate. Set to 0 to disable.",
                     "raz_time": "Time to reset active time counters. Should be before first exposure to sunlight but not too early to allow enough time for night activation"
                 }
             },
