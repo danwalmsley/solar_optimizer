@@ -91,9 +91,9 @@ central_config_schema = vol.Schema(
                 mode=selector.NumberSelectorMode.BOX,
             )
         ),
-        vol.Optional(
-            CONF_MINIMUM_BATTERY_CHARGE_POWER,
-            default=DEFAULT_MINIMUM_BATTERY_CHARGE_POWER,
+        vol.Required(
+            CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
+            default=DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=0,
@@ -103,7 +103,10 @@ central_config_schema = vol.Schema(
                 mode=selector.NumberSelectorMode.BOX,
             )
         ),
-        vol.Optional(CONF_BATTERY_CHARGE_RESERVE_START_SOC): selector.NumberSelector(
+        vol.Required(
+            CONF_BATTERY_CHARGE_RESERVE_START_SOC,
+            default=DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC,
+        ): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=0,
                 max=99,

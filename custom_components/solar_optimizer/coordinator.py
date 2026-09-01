@@ -32,12 +32,13 @@ from .const import (
     CONF_BATTERY_CHARGE_RESERVE_START_SOC,
     CONF_BATTERY_POWER_STRATEGY,
     CONF_DECISION_REVERSAL_HOLD_SEC,
-    CONF_MINIMUM_BATTERY_CHARGE_POWER,
+    CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
     CONF_MINIMUM_EXPORT_POWER,
     DEFAULT_BATTERY_BUDGET_START_SOC,
     DEFAULT_BATTERY_BUDGET_STOP_SOC,
     DEFAULT_DECISION_REVERSAL_HOLD_SEC,
-    DEFAULT_MINIMUM_BATTERY_CHARGE_POWER,
+    DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC,
+    DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
     DEFAULT_MINIMUM_EXPORT_POWER,
     DEFAULT_RAZ_TIME,
     DEFAULT_REFRESH_PERIOD_SEC,
@@ -91,10 +92,12 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         self._battery_power_strategy: str = BATTERY_POWER_STRATEGY_EXISTING
         self._battery_budget_start_soc: float = DEFAULT_BATTERY_BUDGET_START_SOC
         self._battery_budget_stop_soc: float = DEFAULT_BATTERY_BUDGET_STOP_SOC
-        self._minimum_battery_charge_power: float = (
-            DEFAULT_MINIMUM_BATTERY_CHARGE_POWER
+        self._maximum_battery_charge_reserve_power: float = (
+            DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER
         )
-        self._battery_charge_reserve_start_soc: float | None = None
+        self._battery_charge_reserve_start_soc: float = (
+            DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC
+        )
         self._minimum_export_power: float = DEFAULT_MINIMUM_EXPORT_POWER
         self._decision_reversal_hold_sec: float = DEFAULT_DECISION_REVERSAL_HOLD_SEC
         self._last_state_change_command: dict[str, tuple[float, bool, float]] = {}
@@ -174,15 +177,17 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
                 DEFAULT_BATTERY_BUDGET_STOP_SOC,
             )
         )
-        self._minimum_battery_charge_power = float(
+        self._maximum_battery_charge_reserve_power = float(
             config.data.get(
-                CONF_MINIMUM_BATTERY_CHARGE_POWER,
-                DEFAULT_MINIMUM_BATTERY_CHARGE_POWER,
+                CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
+                DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
             )
         )
-        reserve_start_soc = config.data.get(CONF_BATTERY_CHARGE_RESERVE_START_SOC)
-        self._battery_charge_reserve_start_soc = (
-            float(reserve_start_soc) if reserve_start_soc is not None else None
+        self._battery_charge_reserve_start_soc = float(
+            config.data.get(
+                CONF_BATTERY_CHARGE_RESERVE_START_SOC,
+                DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC,
+            )
         )
         self._minimum_export_power = float(
             config.data.get(
@@ -277,14 +282,14 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         self._update_battery_budget(soc)
         calculated_data["battery_budget_active"] = self._battery_budget_active
         calculated_data["battery_power_strategy"] = self._battery_power_strategy
-        calculated_data["minimum_battery_charge_power"] = (
-            self._minimum_battery_charge_power
+        calculated_data["maximum_battery_charge_reserve_power"] = (
+            self._maximum_battery_charge_reserve_power
         )
         calculated_data["battery_charge_reserve_start_soc"] = (
             self._battery_charge_reserve_start_soc
         )
-        calculated_data["effective_minimum_battery_charge_power"] = (
-            self._effective_minimum_battery_charge_power(soc)
+        calculated_data["effective_battery_charge_reserve_power"] = (
+            self._effective_battery_charge_reserve_power(soc)
         )
         calculated_data["minimum_export_power"] = self._minimum_export_power
         calculated_data["decision_reversal_hold_sec"] = (
@@ -417,12 +422,12 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         elif battery_soc <= self._battery_budget_stop_soc:
             self._battery_budget_active = False
 
-    def _effective_minimum_battery_charge_power(
+    def _effective_battery_charge_reserve_power(
         self, battery_soc: float | None
     ) -> float:
-        """Return the fixed or SOC-tapered charging reserve for this cycle."""
+        """Return the SOC-tapered charging reserve for this cycle."""
         return battery_charge_reserve_power(
-            self._minimum_battery_charge_power,
+            self._maximum_battery_charge_reserve_power,
             self._battery_charge_reserve_start_soc,
             self._battery_budget_stop_soc,
             self._battery_budget_start_soc,
@@ -460,7 +465,7 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         return (
             grid_power
             + battery_power
-            + self._effective_minimum_battery_charge_power(battery_soc)
+            + self._effective_battery_charge_reserve_power(battery_soc)
             + self._minimum_export_power
         )
 

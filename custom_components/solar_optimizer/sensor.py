@@ -78,7 +78,7 @@ async def async_setup_entry(
             coordinator, hass, "minimum_export_power"
         )
         entity11 = SolarOptimizerSensorEntity(
-            coordinator, hass, "minimum_battery_charge_power"
+            coordinator, hass, "maximum_battery_charge_reserve_power"
         )
         entity12 = SolarOptimizerSensorEntity(
             coordinator, hass, "decision_reversal_hold_sec"
@@ -87,7 +87,7 @@ async def async_setup_entry(
             coordinator, hass, "battery_power_strategy"
         )
         entity14 = SolarOptimizerSensorEntity(
-            coordinator, hass, "effective_minimum_battery_charge_power"
+            coordinator, hass, "effective_battery_charge_reserve_power"
         )
 
         async_add_entities(
@@ -194,8 +194,8 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
         elif self.idx == "minimum_export_power":
             return "mdi:transmission-tower-export"
         elif self.idx in (
-            "minimum_battery_charge_power",
-            "effective_minimum_battery_charge_power",
+            "maximum_battery_charge_reserve_power",
+            "effective_battery_charge_reserve_power",
         ):
             return "mdi:battery-arrow-up"
         elif self.idx == "decision_reversal_hold_sec":

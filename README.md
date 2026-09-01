@@ -192,8 +192,8 @@ You need to specify:
    - **Charge first with battery budget** enforces the same charging floor until the upper SOC threshold is reached. It then lets an already-running flexible load ride through solar dips using the battery until the lower SOC threshold is reached.
 10. **Open battery budget at SOC**, the upper threshold that opens the battery budget (for example, 100%).
 11. **Close battery budget at SOC**, the lower threshold that closes it (for example, 90%). The two thresholds form a stateful hysteresis band rather than a single cycling boundary.
-12. **Maximum charge-priority reserve**, the charging rate in watts that flexible loads must preserve at and below the taper-start SOC. When no taper start is supplied, this remains the fixed charging floor used by previous fork versions.
-13. **Charge-priority taper starts at SOC**, an optional SOC where the full reserve applies. Above this point the reserve decreases in 10-percentage-point steps up to the close-budget SOC, then in 5-point steps up to the open-budget SOC. The settings flow shows the complete calculated curve for review before saving. For example, a 2700 W reserve starting at 50%, closing at 90%, and opening at 100% produces 2700, 2160, 1620, 1080, 540, 270, and 0 W steps. These are minimum targets while flexible loads run, not battery charging caps.
+12. **Maximum charge-priority reserve**, the charging rate in watts that flexible loads must preserve at and below the taper-start SOC.
+13. **Charge-priority taper starts at SOC**, the SOC where the full reserve applies. Above this point the reserve decreases in 10-percentage-point steps up to the close-budget SOC, then in 5-point steps up to the open-budget SOC. The settings flow shows the complete calculated curve for review before saving. For example, a 2700 W reserve starting at 50%, closing at 90%, and opening at 100% produces 2700, 2160, 1620, 1080, 540, 270, and 0 W steps. These are minimum targets while flexible loads run, not battery charging caps.
 14. **Minimum export reserve**, additional real grid export in watts that remains reserved before flexible loads are considered while the battery budget is closed. This can normally remain at 0 W when a battery charging floor is configured.
 15. **Opposite decision hold**, a short settling period in seconds after an optimizer on/off command. The first decision is immediate, but its opposite is suppressed until this period expires. This is useful with event recalculation because inverter and grid sensors can briefly show import while a large load starts. Set to 0 to disable; 10 seconds is a good starting point.
 16. **The start time of the day**. At this time, the usage counters of the equipment are reset to zero. The default value is 05:00. Ideally, this should be set before the first production of the day and as late as possible for off-peak activations.
@@ -425,8 +425,8 @@ Once the integration is properly configured, a **device** named `'configuration'
 7. A sensor named `effective_power_consumption`: the policy-adjusted net power passed to the optimizer.
 8. A sensor named `usable_excess_power`: the non-negative surplus currently available to flexible loads after policy and margin adjustments.
 9. A sensor named `minimum_export_power`: the configured export reserve.
-10. A sensor named `minimum_battery_charge_power`: the configured maximum or fixed battery charging reserve.
-11. A sensor named `effective_minimum_battery_charge_power`: the SOC-adjusted reserve currently enforced.
+10. A sensor named `maximum_battery_charge_reserve_power`: the configured maximum battery charging reserve.
+11. A sensor named `effective_battery_charge_reserve_power`: the SOC-adjusted reserve currently enforced.
 12. A sensor named `decision_reversal_hold_sec`: the configured opposite-decision settling period.
 13. A sensor named `battery_power_strategy`: the selected strategy.
 14. A binary sensor named `battery_budget_active`: whether the SOC hysteresis budget is currently open.
