@@ -81,6 +81,9 @@ async def async_setup_entry(
             coordinator, hass, "minimum_battery_charge_power"
         )
         entity12 = SolarOptimizerSensorEntity(
+            coordinator, hass, "decision_reversal_hold_sec"
+        )
+        entity13 = SolarOptimizerSensorEntity(
             coordinator, hass, "battery_power_strategy"
         )
 
@@ -98,6 +101,7 @@ async def async_setup_entry(
                 entity10,
                 entity11,
                 entity12,
+                entity13,
             ],
             False,
         )
@@ -187,6 +191,8 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             return "mdi:transmission-tower-export"
         elif self.idx == "minimum_battery_charge_power":
             return "mdi:battery-arrow-up"
+        elif self.idx == "decision_reversal_hold_sec":
+            return "mdi:timer-lock"
         elif self.idx == "battery_power_strategy":
             return "mdi:battery-sync"
         else:
@@ -198,14 +204,14 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             return SensorDeviceClass.MONETARY
         elif self.idx == "battery_soc":
             return SensorDeviceClass.BATTERY
-        elif self.idx == "battery_power_strategy":
+        elif self.idx in ("battery_power_strategy", "decision_reversal_hold_sec"):
             return None
         else:
             return SensorDeviceClass.POWER
 
     @property
     def state_class(self) -> SensorStateClass | None:
-        if self.idx == "battery_power_strategy":
+        if self.idx in ("battery_power_strategy", "decision_reversal_hold_sec"):
             return None
         elif self.device_class in (SensorDeviceClass.POWER, SensorDeviceClass.BATTERY):
             return SensorStateClass.MEASUREMENT
@@ -220,6 +226,8 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             return "%"
         elif self.idx == "battery_power_strategy":
             return None
+        elif self.idx == "decision_reversal_hold_sec":
+            return UnitOfTime.SECONDS
         else:
             return UnitOfPower.WATT
 

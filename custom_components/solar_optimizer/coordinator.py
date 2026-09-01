@@ -2,6 +2,7 @@
 
 import logging
 import math
+import time as monotonic_time
 from datetime import datetime, timedelta, time
 from typing import Any
 
@@ -29,10 +30,12 @@ from .const import (
     CONF_BATTERY_BUDGET_START_SOC,
     CONF_BATTERY_BUDGET_STOP_SOC,
     CONF_BATTERY_POWER_STRATEGY,
+    CONF_DECISION_REVERSAL_HOLD_SEC,
     CONF_MINIMUM_BATTERY_CHARGE_POWER,
     CONF_MINIMUM_EXPORT_POWER,
     DEFAULT_BATTERY_BUDGET_START_SOC,
     DEFAULT_BATTERY_BUDGET_STOP_SOC,
+    DEFAULT_DECISION_REVERSAL_HOLD_SEC,
     DEFAULT_MINIMUM_BATTERY_CHARGE_POWER,
     DEFAULT_MINIMUM_EXPORT_POWER,
     DEFAULT_RAZ_TIME,
@@ -90,6 +93,8 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
             DEFAULT_MINIMUM_BATTERY_CHARGE_POWER
         )
         self._minimum_export_power: float = DEFAULT_MINIMUM_EXPORT_POWER
+        self._decision_reversal_hold_sec: float = DEFAULT_DECISION_REVERSAL_HOLD_SEC
+        self._last_state_change_command: dict[str, tuple[float, bool, float]] = {}
         self._battery_budget_active: bool = False
         self._raz_time: time = None
 
@@ -178,6 +183,13 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
                 DEFAULT_MINIMUM_EXPORT_POWER,
             )
         )
+        self._decision_reversal_hold_sec = float(
+            config.data.get(
+                CONF_DECISION_REVERSAL_HOLD_SEC,
+                DEFAULT_DECISION_REVERSAL_HOLD_SEC,
+            )
+        )
+        self._last_state_change_command.clear()
         # If Home Assistant restarts while the SOC is between the thresholds, start
         # conservatively. The budget opens again only after the upper threshold is met.
         self._battery_budget_active = False
@@ -262,6 +274,9 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
             self._minimum_battery_charge_power
         )
         calculated_data["minimum_export_power"] = self._minimum_export_power
+        calculated_data["decision_reversal_hold_sec"] = (
+            self._decision_reversal_hold_sec
+        )
         calculated_data["minimum_charge_constraint_active"] = (
             self._minimum_charge_constraint_active
         )
@@ -297,6 +312,7 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
             best_solution,
             calculated_data["effective_power_consumption"],
         )
+        best_solution, total_power = self._apply_decision_reversal_hold(best_solution)
 
         calculated_data["best_solution"] = best_solution
         calculated_data["best_objective"] = best_objective
@@ -315,25 +331,40 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
 
             old_requested_power = device.requested_power
             is_active = device.is_active
+            state_command_pending = False
             should_force_offpeak = device.should_be_forced_offpeak
             if calculated_data["minimum_charge_constraint_active"] and not state:
+                should_force_offpeak = False
+            if should_force_offpeak and self._is_recent_state_change_command(
+                name, False
+            ):
                 should_force_offpeak = False
             if should_force_offpeak:
                 _LOGGER.debug("%s - we should force %s name", self, name)
             if is_active and not state and not should_force_offpeak:
-                _LOGGER.debug("Extinction de %s", name)
-                should_log = True
-                old_requested_power = 0
-                await device.deactivate()
+                if not self._is_recent_state_change_command(name, False):
+                    _LOGGER.debug("Extinction de %s", name)
+                    should_log = True
+                    old_requested_power = 0
+                    await device.deactivate()
+                    self._record_state_change_command(name, False, 0)
             elif not is_active and (state or should_force_offpeak):
-                _LOGGER.debug("Allumage de %s", name)
-                should_log = True
-                old_requested_power = requested_power
-                await device.activate(requested_power)
+                state_command_pending = self._is_recent_state_change_command(
+                    name, True
+                )
+                if not state_command_pending:
+                    _LOGGER.debug("Allumage de %s", name)
+                    should_log = True
+                    old_requested_power = requested_power
+                    await device.activate(requested_power)
+                    self._record_state_change_command(
+                        name, True, requested_power or device.power_max
+                    )
 
             # Send change power if state is now on and change power is accepted and (power have change or eqt is just activated)
             if (
                 state
+                and not state_command_pending
                 and device.can_change_power
                 and (device.current_power != requested_power or not is_active)
             ):
@@ -463,6 +494,67 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
 
             if projected_deficit <= 0:
                 break
+
+        return solution, self._algo.consommation_equipements(solution)
+
+    def _record_state_change_command(
+        self, device_name: str, state: bool, requested_power: float
+    ) -> None:
+        """Record an optimizer on/off command for reversal throttling."""
+        self._last_state_change_command[device_name] = (
+            monotonic_time.monotonic(),
+            state,
+            requested_power,
+        )
+
+    def _is_recent_state_change_command(
+        self,
+        device_name: str,
+        state: bool,
+        now: float | None = None,
+    ) -> bool:
+        """Return whether this same command is already settling."""
+        previous = self._last_state_change_command.get(device_name)
+        if previous is None or self._decision_reversal_hold_sec <= 0:
+            return False
+
+        changed_at, commanded_state, _ = previous
+        current_time = monotonic_time.monotonic() if now is None else now
+        return (
+            commanded_state == state
+            and current_time - changed_at < self._decision_reversal_hold_sec
+        )
+
+    def _apply_decision_reversal_hold(
+        self,
+        solution: list[dict],
+        now: float | None = None,
+    ) -> tuple[list[dict], float]:
+        """Suppress only the opposite state decision during the settling window.
+
+        With no prior command, the first decision is immediate. Repeating the same
+        decision is allowed; only a command that would reverse the last optimizer
+        state change is held until the configured number of seconds has elapsed.
+        """
+        if self._decision_reversal_hold_sec <= 0:
+            return solution, self._algo.consommation_equipements(solution)
+
+        current_time = monotonic_time.monotonic() if now is None else now
+        for equipment in solution:
+            previous = self._last_state_change_command.get(equipment["name"])
+            if previous is None:
+                continue
+
+            changed_at, commanded_state, commanded_power = previous
+            if (
+                equipment["state"] != commanded_state
+                and current_time - changed_at < self._decision_reversal_hold_sec
+            ):
+                equipment["state"] = commanded_state
+                equipment["requested_power"] = (
+                    commanded_power if commanded_state else 0
+                )
+                equipment["decision_reversal_held"] = True
 
         return solution, self._algo.consommation_equipements(solution)
 
