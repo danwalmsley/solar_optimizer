@@ -29,9 +29,11 @@ from .const import (
     CONF_BATTERY_BUDGET_START_SOC,
     CONF_BATTERY_BUDGET_STOP_SOC,
     CONF_BATTERY_POWER_STRATEGY,
+    CONF_MINIMUM_BATTERY_CHARGE_POWER,
     CONF_MINIMUM_EXPORT_POWER,
     DEFAULT_BATTERY_BUDGET_START_SOC,
     DEFAULT_BATTERY_BUDGET_STOP_SOC,
+    DEFAULT_MINIMUM_BATTERY_CHARGE_POWER,
     DEFAULT_MINIMUM_EXPORT_POWER,
     DEFAULT_RAZ_TIME,
     DEFAULT_REFRESH_PERIOD_SEC,
@@ -84,6 +86,9 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         self._battery_power_strategy: str = BATTERY_POWER_STRATEGY_EXISTING
         self._battery_budget_start_soc: float = DEFAULT_BATTERY_BUDGET_START_SOC
         self._battery_budget_stop_soc: float = DEFAULT_BATTERY_BUDGET_STOP_SOC
+        self._minimum_battery_charge_power: float = (
+            DEFAULT_MINIMUM_BATTERY_CHARGE_POWER
+        )
         self._minimum_export_power: float = DEFAULT_MINIMUM_EXPORT_POWER
         self._battery_budget_active: bool = False
         self._raz_time: time = None
@@ -159,6 +164,12 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
             config.data.get(
                 CONF_BATTERY_BUDGET_STOP_SOC,
                 DEFAULT_BATTERY_BUDGET_STOP_SOC,
+            )
+        )
+        self._minimum_battery_charge_power = float(
+            config.data.get(
+                CONF_MINIMUM_BATTERY_CHARGE_POWER,
+                DEFAULT_MINIMUM_BATTERY_CHARGE_POWER,
             )
         )
         self._minimum_export_power = float(
@@ -247,7 +258,13 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         self._update_battery_budget(soc)
         calculated_data["battery_budget_active"] = self._battery_budget_active
         calculated_data["battery_power_strategy"] = self._battery_power_strategy
+        calculated_data["minimum_battery_charge_power"] = (
+            self._minimum_battery_charge_power
+        )
         calculated_data["minimum_export_power"] = self._minimum_export_power
+        calculated_data["minimum_charge_constraint_active"] = (
+            self._minimum_charge_constraint_active
+        )
         calculated_data["effective_power_consumption"] = (
             self._effective_power_consumption(
                 calculated_data["power_consumption"],
@@ -276,6 +293,11 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
             calculated_data["priority_weight"],
         )
 
+        best_solution, total_power = self._enforce_minimum_charge_constraint(
+            best_solution,
+            calculated_data["effective_power_consumption"],
+        )
+
         calculated_data["best_solution"] = best_solution
         calculated_data["best_objective"] = best_objective
         calculated_data["total_power"] = total_power
@@ -294,6 +316,8 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
             old_requested_power = device.requested_power
             is_active = device.is_active
             should_force_offpeak = device.should_be_forced_offpeak
+            if calculated_data["minimum_charge_constraint_active"] and not state:
+                should_force_offpeak = False
             if should_force_offpeak:
                 _LOGGER.debug("%s - we should force %s name", self, name)
             if is_active and not state and not should_force_offpeak:
@@ -371,10 +395,76 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
             # ride through solar dips using the battery until the lower threshold.
             return grid_power
 
-        # Reserve all charging power for the battery, while still exposing battery
-        # discharge as a deficit. The margin requires this much real grid export
-        # before a flexible load is considered affordable.
-        return grid_power + max(battery_power, 0) + self._minimum_export_power
+        # Flexible loads may reduce charging, but the configured charging floor and
+        # export margin are reserved. A positive value means the floor is violated.
+        return (
+            grid_power
+            + battery_power
+            + self._minimum_battery_charge_power
+            + self._minimum_export_power
+        )
+
+    @property
+    def _minimum_charge_constraint_active(self) -> bool:
+        """Return whether the hard charging floor applies in the current cycle."""
+        return self._battery_power_strategy != BATTERY_POWER_STRATEGY_EXISTING and not (
+            self._battery_power_strategy
+            == BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET
+            and self._battery_budget_active
+        )
+
+    def _enforce_minimum_charge_constraint(
+        self,
+        solution: list[dict],
+        effective_power_consumption: float | None,
+    ) -> tuple[list[dict], float]:
+        """Shed flexible power until the battery charging floor is respected.
+
+        This final deterministic pass makes the floor independent of energy prices,
+        priorities, and normal minimum-on timers. Lower-priority devices are shed
+        first; variable-power devices are reduced in configured steps before stopping.
+        """
+        total_power = self._algo.consommation_equipements(solution)
+        if (
+            not self._minimum_charge_constraint_active
+            or effective_power_consumption is None
+            or not solution
+        ):
+            return solution, total_power
+
+        current_power = sum(
+            equipment["current_power"]
+            for equipment in solution
+            if equipment["state"] or equipment["current_power"] > 0
+        )
+        projected_deficit = effective_power_consumption + total_power - current_power
+        if projected_deficit <= 0:
+            return solution, total_power
+
+        for equipment in sorted(
+            (equipment for equipment in solution if equipment["state"]),
+            key=lambda equipment: equipment["priority"],
+            reverse=True,
+        ):
+            requested_power = equipment["requested_power"]
+            if equipment["can_change_power"]:
+                while requested_power > 0 and projected_deficit > 0:
+                    new_power = max(0, requested_power - equipment["power_step"])
+                    if 0 < new_power < equipment["power_min"]:
+                        new_power = 0
+                    projected_deficit -= requested_power - new_power
+                    requested_power = new_power
+                equipment["requested_power"] = requested_power
+                equipment["state"] = requested_power > 0
+            else:
+                equipment["state"] = False
+                equipment["requested_power"] = 0
+                projected_deficit -= requested_power
+
+            if projected_deficit <= 0:
+                break
+
+        return solution, self._algo.consommation_equipements(solution)
 
     @classmethod
     def get_coordinator(cls) -> Any:
