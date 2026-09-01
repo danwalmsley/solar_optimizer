@@ -207,6 +207,74 @@ async def test_invalid_battery_budget_thresholds(
     }
 
 
+async def test_battery_charge_reserve_curve_review(
+    hass: HomeAssistant, skip_hass_states_get, reset_coordinator
+):
+    """A configured taper is previewed before the central entry is saved."""
+    result = await hass.config_entries.flow.async_init(
+        config_flow.DOMAIN, context={"source": "user"}
+    )
+    user_input = {
+        CONF_POWER_CONSUMPTION_ENTITY_ID: "input_number.power_consumption",
+        CONF_POWER_PRODUCTION_ENTITY_ID: "input_number.power_production",
+        CONF_SELL_COST_ENTITY_ID: "input_number.sell_cost",
+        CONF_BUY_COST_ENTITY_ID: "input_number.buy_cost",
+        CONF_SELL_TAX_PERCENT_ENTITY_ID: "input_number.tax_percent",
+        CONF_BATTERY_POWER_STRATEGY: BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
+        CONF_BATTERY_BUDGET_START_SOC: 100,
+        CONF_BATTERY_BUDGET_STOP_SOC: 90,
+        CONF_MINIMUM_BATTERY_CHARGE_POWER: 2700,
+        CONF_BATTERY_CHARGE_RESERVE_START_SOC: 50,
+    }
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input=user_input
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "battery_reserve_review"
+    curve = result["description_placeholders"]["battery_reserve_curve"]
+    assert "| 50–59% | 2700 W |" in curve
+    assert "| 90–94% | 540 W |" in curve
+    assert "| 95–99% | 270 W |" in curve
+    assert "| 100% | 0 W" in curve
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input={}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_BATTERY_CHARGE_RESERVE_START_SOC] == 50
+
+
+async def test_invalid_battery_charge_reserve_start_soc(
+    hass: HomeAssistant, skip_hass_states_get, reset_coordinator
+):
+    """The taper must start below both battery-budget thresholds."""
+    result = await hass.config_entries.flow.async_init(
+        config_flow.DOMAIN, context={"source": "user"}
+    )
+    user_input = {
+        CONF_POWER_CONSUMPTION_ENTITY_ID: "input_number.power_consumption",
+        CONF_POWER_PRODUCTION_ENTITY_ID: "input_number.power_production",
+        CONF_SELL_COST_ENTITY_ID: "input_number.sell_cost",
+        CONF_BUY_COST_ENTITY_ID: "input_number.buy_cost",
+        CONF_SELL_TAX_PERCENT_ENTITY_ID: "input_number.tax_percent",
+        CONF_BATTERY_POWER_STRATEGY: BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
+        CONF_BATTERY_BUDGET_START_SOC: 100,
+        CONF_BATTERY_BUDGET_STOP_SOC: 90,
+        CONF_BATTERY_CHARGE_RESERVE_START_SOC: 90,
+    }
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input=user_input
+    )
+
+    assert result["step_id"] == "device_central"
+    assert result["errors"] == {
+        CONF_BATTERY_CHARGE_RESERVE_START_SOC: "battery_charge_reserve_invalid"
+    }
+
+
 async def test_wrong_raz_time(
     hass: HomeAssistant, skip_hass_states_get, reset_coordinator
 ):
