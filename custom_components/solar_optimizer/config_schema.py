@@ -59,6 +59,50 @@ central_config_schema = vol.Schema(
         vol.Optional(CONF_BATTERY_CHARGE_POWER_ENTITY_ID): selector.EntitySelector(
             selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN, INPUT_NUMBER_DOMAIN])
         ),
+        vol.Optional(
+            CONF_BATTERY_POWER_STRATEGY,
+            default=BATTERY_POWER_STRATEGY_EXISTING,
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=BATTERY_POWER_STRATEGIES,
+                translation_key="battery_power_strategy",
+                mode="dropdown",
+            )
+        ),
+        vol.Optional(
+            CONF_BATTERY_BUDGET_START_SOC,
+            default=DEFAULT_BATTERY_BUDGET_START_SOC,
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
+                max=100,
+                step=1,
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        ),
+        vol.Optional(
+            CONF_BATTERY_BUDGET_STOP_SOC,
+            default=DEFAULT_BATTERY_BUDGET_STOP_SOC,
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
+                max=100,
+                step=1,
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        ),
+        vol.Optional(
+            CONF_MINIMUM_EXPORT_POWER,
+            default=DEFAULT_MINIMUM_EXPORT_POWER,
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
+                max=10000,
+                step=10,
+                unit_of_measurement="W",
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        ),
         vol.Optional(CONF_RAZ_TIME, default=DEFAULT_RAZ_TIME): str,
     }
 )

@@ -65,8 +65,38 @@ async def async_setup_entry(
         entity4 = SolarOptimizerSensorEntity(coordinator, hass, "power_production_brut")
         entity5 = SolarOptimizerSensorEntity(coordinator, hass, "power_consumption")
         entity6 = SolarOptimizerSensorEntity(coordinator, hass, "battery_soc")
+        entity7 = SolarOptimizerSensorEntity(
+            coordinator, hass, "battery_charge_power"
+        )
+        entity8 = SolarOptimizerSensorEntity(
+            coordinator, hass, "effective_power_consumption"
+        )
+        entity9 = SolarOptimizerSensorEntity(
+            coordinator, hass, "usable_excess_power"
+        )
+        entity10 = SolarOptimizerSensorEntity(
+            coordinator, hass, "minimum_export_power"
+        )
+        entity11 = SolarOptimizerSensorEntity(
+            coordinator, hass, "battery_power_strategy"
+        )
 
-        async_add_entities([entity1, entity2, entity3, entity4, entity5, entity6], False)
+        async_add_entities(
+            [
+                entity1,
+                entity2,
+                entity3,
+                entity4,
+                entity5,
+                entity6,
+                entity7,
+                entity8,
+                entity9,
+                entity10,
+                entity11,
+            ],
+            False,
+        )
 
         await coordinator.configure(entry)
         return
@@ -143,6 +173,16 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             return "mdi:battery"
         elif self.idx == "power_consumption":
             return "mdi:home-lightning-bolt"
+        elif self.idx == "battery_charge_power":
+            return "mdi:battery-charging"
+        elif self.idx == "effective_power_consumption":
+            return "mdi:transmission-tower-import"
+        elif self.idx == "usable_excess_power":
+            return "mdi:solar-power"
+        elif self.idx == "minimum_export_power":
+            return "mdi:transmission-tower-export"
+        elif self.idx == "battery_power_strategy":
+            return "mdi:battery-sync"
         else:
             return "mdi:solar-power-variant"
 
@@ -152,12 +192,16 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             return SensorDeviceClass.MONETARY
         elif self.idx == "battery_soc":
             return SensorDeviceClass.BATTERY
+        elif self.idx == "battery_power_strategy":
+            return None
         else:
             return SensorDeviceClass.POWER
 
     @property
     def state_class(self) -> SensorStateClass | None:
-        if self.device_class in (SensorDeviceClass.POWER, SensorDeviceClass.BATTERY):
+        if self.idx == "battery_power_strategy":
+            return None
+        elif self.device_class in (SensorDeviceClass.POWER, SensorDeviceClass.BATTERY):
             return SensorStateClass.MEASUREMENT
         else:
             return SensorStateClass.TOTAL
@@ -168,6 +212,8 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             return "€"
         elif self.idx == "battery_soc":
             return "%"
+        elif self.idx == "battery_power_strategy":
+            return None
         else:
             return UnitOfPower.WATT
 

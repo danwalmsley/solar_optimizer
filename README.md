@@ -6,6 +6,8 @@
 
 ![Icon](https://github.com/jmcollin78/solar_optimizer/blob/main/images/icon.png?raw=true)
 
+> This fork adds battery charge-priority and SOC-hysteresis controls while retaining the upstream behavior as the default.
+
 > ![Tip](https://github.com/jmcollin78/solar_optimizer/blob/main/images/tips.png?raw=true) This integration allows you to optimize the use of your solar energy. It controls the switching on and off of your equipment, the activation of which is deferred over time depending on production and current electricity consumption.
 
 - [What is Solar Optimizer?](#what-is-solar-optimizer)
@@ -184,7 +186,16 @@ You need to specify:
 6. A sensor or `input_number` that provides **the applicable tax rate on exported kWh** as a percentage (positive number or 0 if you do not resell or do not know this value). This value depends on your contract. It is not critical to the algorithm, so a value of 0 is perfectly fine.
 7. An optional sensor that provides **the charge level of a possible solar battery** in percentage. If your solar installation does not include a battery, leave this field empty.
 8. A sensor that provides **the net instantaneous charging power of the battery**. It must be expressed in watt and should be negative when the battery is charging and positive when the battery is discharging. This value will be added to the net consumed power. If the net consumed power is -1000 W (selling 1000 W) but the battery is charging at -500 W, it means that the surplus available for the algorithm is 1500 W.
-9. **The start time of the day**. At this time, the usage counters of the equipment are reset to zero. The default value is 05:00. Ideally, this should be set before the first production of the day and as late as possible for off-peak activations.
+9. A **battery power strategy**:
+   - **Existing behavior** preserves the upstream calculation and treats battery charging as available surplus.
+   - **Charge battery first** reserves battery charging power and counts battery discharge as a deficit.
+   - **Charge first with battery budget** behaves like charge-first until the upper SOC threshold is reached. It then lets an already-running flexible load ride through solar dips using the battery until the lower SOC threshold is reached.
+10. **Open battery budget at SOC**, the upper threshold that opens the battery budget (for example, 100%).
+11. **Close battery budget at SOC**, the lower threshold that closes it (for example, 90%). The two thresholds form a stateful hysteresis band rather than a single cycling boundary.
+12. **Minimum export reserve**, the real grid export in watts that remains reserved before flexible loads are considered while the battery budget is closed. A value such as 150-200 W gives an on/off load some headroom.
+13. **The start time of the day**. At this time, the usage counters of the equipment are reset to zero. The default value is 05:00. Ideally, this should be set before the first production of the day and as late as possible for off-peak activations.
+
+When Home Assistant restarts while SOC is between the two battery-budget thresholds, the budget starts closed. It opens again when the upper threshold is reached. A load still needs genuine export to start; once the budget is open, an already-running load may be supported by the battery until the lower threshold.
 
 Except for the solar battery charge level, these parameters are essential for the algorithm to function, so they are all mandatory. Using sensors or `input_number` allows values to be updated in real-time at each cycle. Consequently, when off-peak hours begin, the calculation may change, impacting the state of the equipment as importing energy becomes cheaper. Everything is dynamic and recalculated in each cycle.
 
@@ -406,7 +417,14 @@ Once the integration is properly configured, a **device** named `'configuration'
 2. A sensor named `best_objective`: the cost function value (see algorithm operation). The **lower** the value, the **better** the solution.
 3. A sensor named `power_production`: the last **smoothed** solar production value considered (if the option is enabled).
 4. A sensor named `power_production_brut`: the last **raw** solar production value considered.
-5. a dropdown list named `priority weight` which defines the weight given to priority management compared to solar consumption optimization. See [priority management](#priority-management).
+5. A sensor named `power_consumption`: the measured net grid power supplied to the integration.
+6. A sensor named `battery_charge_power`: the measured signed battery power.
+7. A sensor named `effective_power_consumption`: the policy-adjusted net power passed to the optimizer.
+8. A sensor named `usable_excess_power`: the non-negative surplus currently available to flexible loads after policy and margin adjustments.
+9. A sensor named `minimum_export_power`: the configured export reserve.
+10. A sensor named `battery_power_strategy`: the selected strategy.
+11. A binary sensor named `battery_budget_active`: whether the SOC hysteresis budget is currently open.
+12. A dropdown list named `priority weight` which defines the weight given to priority management compared to solar consumption optimization. See [priority management](#priority-management).
 
 ![Configuration Entities](images/entities-configuration.png)
 
@@ -780,16 +798,16 @@ If you would like to contribute, please read the [contribution guidelines](CONTR
 
 ***
 
-[solar_optimizer]: https://github.com/jmcollin78/solar_optimizer
+[solar_optimizer]: https://github.com/danwalmsley/solar_optimizer
 [buymecoffee]: https://www.buymeacoffee.com/jmcollin78
 [buymecoffeebadge]: https://img.shields.io/badge/Buy%20me%20a%20beer-%245-orange?style=for-the-badge&logo=buy-me-a-beer
-[commits-shield]: https://img.shields.io/github/commit-activity/y/jmcollin78/solar_optimizer.svg?style=for-the-badge
-[commits]: https://github.com/jmcollin78/solar_optimizer/commits/master
+[commits-shield]: https://img.shields.io/github/commit-activity/y/danwalmsley/solar_optimizer.svg?style=for-the-badge
+[commits]: https://github.com/danwalmsley/solar_optimizer/commits/main
 [hacs]: https://github.com/custom-components/hacs
 [hacs_badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge
 [forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg?style=for-the-badge
 [forum]: https://forum.hacf.fr/
-[license-shield]: https://img.shields.io/github/license/jmcollin78/solar_optimizer.svg?style=for-the-badge
+[license-shield]: https://img.shields.io/github/license/danwalmsley/solar_optimizer.svg?style=for-the-badge
 [maintenance-shield]: https://img.shields.io/badge/maintainer-Joakim%20Sørensen%20%40ludeeus-blue.svg?style=for-the-badge
-[releases-shield]: https://img.shields.io/github/release/jmcollin78/solar_optimizer.svg?style=for-the-badge
-[releases]: https://github.com/jmcollin78/solar_optimizer/releases
+[releases-shield]: https://img.shields.io/github/release/danwalmsley/solar_optimizer.svg?style=for-the-badge
+[releases]: https://github.com/danwalmsley/solar_optimizer/releases

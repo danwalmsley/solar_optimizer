@@ -12,7 +12,12 @@ from homeassistant.util import dt as dt_util
 from homeassistant.helpers.template import Template, is_template_string
 
 SOLAR_OPTIMIZER_DOMAIN = DOMAIN = "solar_optimizer"
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH, Platform.SELECT]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.SENSOR,
+    Platform.SWITCH,
+    Platform.SELECT,
+]
 
 DEVICE_MANUFACTURER = "JMCOLLIN"
 DEVICE_MODEL = "Solar Optimizer"
@@ -78,9 +83,26 @@ CONF_RAZ_TIME = "raz_time"
 CONF_BATTERY_SOC_ENTITY_ID = "battery_soc_entity_id"
 CONF_BATTERY_CHARGE_POWER_ENTITY_ID = "battery_charge_power_entity_id"
 CONF_BATTERY_SOC_THRESHOLD = "battery_soc_threshold"
+CONF_BATTERY_POWER_STRATEGY = "battery_power_strategy"
+CONF_BATTERY_BUDGET_START_SOC = "battery_budget_start_soc"
+CONF_BATTERY_BUDGET_STOP_SOC = "battery_budget_stop_soc"
+CONF_MINIMUM_EXPORT_POWER = "minimum_export_power"
 CONF_MAX_ON_TIME_PER_DAY_MIN = "max_on_time_per_day_min"
 CONF_MIN_ON_TIME_PER_DAY_MIN = "min_on_time_per_day_min"
 CONF_OFFPEAK_TIME = "offpeak_time"
+
+BATTERY_POWER_STRATEGY_EXISTING = "existing"
+BATTERY_POWER_STRATEGY_CHARGE_FIRST = "charge_first"
+BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET = "charge_first_with_budget"
+BATTERY_POWER_STRATEGIES = [
+    BATTERY_POWER_STRATEGY_EXISTING,
+    BATTERY_POWER_STRATEGY_CHARGE_FIRST,
+    BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
+]
+
+DEFAULT_BATTERY_BUDGET_START_SOC = 100
+DEFAULT_BATTERY_BUDGET_STOP_SOC = 90
+DEFAULT_MINIMUM_EXPORT_POWER = 0
 
 PRIORITY_WEIGHT_NULL = "None"
 PRIORITY_WEIGHT_LOW = "Low"
@@ -229,3 +251,7 @@ class UnknownEntity(HomeAssistantError):
 
 class InvalidTime(HomeAssistantError):
     """Error to indicate the give time is invalid"""
+
+
+class InvalidBatteryBudget(HomeAssistantError):
+    """Error to indicate invalid battery budget hysteresis thresholds."""

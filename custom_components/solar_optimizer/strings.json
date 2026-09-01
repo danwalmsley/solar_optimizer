@@ -27,6 +27,10 @@
                     "smooth_production": "Smooth the solar production",
                     "battery_soc_entity_id": "Battery state of charge",
                     "battery_charge_power_entity_id": "Battery charging power",
+                    "battery_power_strategy": "Battery power strategy",
+                    "battery_budget_start_soc": "Open battery budget at SOC",
+                    "battery_budget_stop_soc": "Close battery budget at SOC",
+                    "minimum_export_power": "Minimum export reserve",
                     "raz_time": "Reset counter time"
                 },
                 "data_description": {
@@ -40,6 +44,10 @@
                     "smooth_production": "If checked, the solar production will be smoothed to avoid hard variation",
                     "battery_soc_entity_id": "The entity id of the battery state of charge in %. If you don't have battery, keep it empty",
                     "battery_charge_power_entity_id": "The entity id of the battery power net charging rate in watt. It should be negative if battery is charging and positive if battery is discharging. Keep it empty if no solar battery is used.",
+                    "battery_power_strategy": "Existing behavior treats battery charging as usable surplus. Charge battery first reserves charging power. Charge first with battery budget also lets an already-running flexible load use the battery after the upper SOC threshold is reached, until the lower threshold is reached.",
+                    "battery_budget_start_soc": "Upper SOC threshold that opens the battery budget. This must be greater than the close threshold.",
+                    "battery_budget_stop_soc": "Lower SOC threshold that closes the battery budget and prevents further flexible-load battery discharge.",
+                    "minimum_export_power": "Extra real grid export required before flexible loads can use surplus while the battery budget is closed.",
                     "raz_time": "Time to reset active time counters. Should be before first exposure to sunlight but not too early to allow enough time for night activation"
                 }
             },
@@ -129,7 +137,8 @@
             }
         },
         "error": {
-            "format_time_invalid": "Format of time should be HH:MM"
+            "format_time_invalid": "Format of time should be HH:MM",
+            "battery_budget_invalid": "The close SOC must be lower than the open SOC"
         }
     },
     "options": {
@@ -159,6 +168,10 @@
                     "smooth_production": "Smooth the solar production",
                     "battery_soc_entity_id": "Battery state of charge",
                     "battery_charge_power_entity_id": "Battery charging power",
+                    "battery_power_strategy": "Battery power strategy",
+                    "battery_budget_start_soc": "Open battery budget at SOC",
+                    "battery_budget_stop_soc": "Close battery budget at SOC",
+                    "minimum_export_power": "Minimum export reserve",
                     "raz_time": "Reset counter time"
                 },
                 "data_description": {
@@ -172,6 +185,10 @@
                     "smooth_production": "If checked, the solar production will be smoothed to avoid hard variation",
                     "battery_soc_entity_id": "The entity id of the battery state of charge in %. If you don't have battery, keep it empty",
                     "battery_charge_power_entity_id": "The entity id of the battery power net charging rate in watt. It should be negative if battery is charging and positive if battery is discharging. Keep it empty if no solar battery is used.",
+                    "battery_power_strategy": "Existing behavior treats battery charging as usable surplus. Charge battery first reserves charging power. Charge first with battery budget also lets an already-running flexible load use the battery after the upper SOC threshold is reached, until the lower threshold is reached.",
+                    "battery_budget_start_soc": "Upper SOC threshold that opens the battery budget. This must be greater than the close threshold.",
+                    "battery_budget_stop_soc": "Lower SOC threshold that closes the battery budget and prevents further flexible-load battery discharge.",
+                    "minimum_export_power": "Extra real grid export required before flexible loads can use surplus while the battery budget is closed.",
                     "raz_time": "Time to reset active time counters. Should be before first exposure to sunlight but not too early to allow enough time for night activation"
                 }
             },
@@ -261,7 +278,8 @@
             }
         },
         "error": {
-            "format_time_invalid": "Format of time should be HH:MM"
+            "format_time_invalid": "Format of time should be HH:MM",
+            "battery_budget_invalid": "The close SOC must be lower than the open SOC"
         }
     },
     "selector": {
@@ -276,6 +294,13 @@
             "options": {
                 "action_call": "Action call",
                 "event": "Event"
+            }
+        },
+        "battery_power_strategy": {
+            "options": {
+                "existing": "Existing behavior",
+                "charge_first": "Charge battery first",
+                "charge_first_with_budget": "Charge first with battery budget"
             }
         }
     }

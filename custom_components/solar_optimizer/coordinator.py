@@ -23,7 +23,21 @@ from homeassistant.util.unit_conversion import (
 
 from homeassistant.config_entries import ConfigEntry
 
-from .const import DEFAULT_REFRESH_PERIOD_SEC, name_to_unique_id, SOLAR_OPTIMIZER_DOMAIN, DEFAULT_RAZ_TIME
+from .const import (
+    BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
+    BATTERY_POWER_STRATEGY_EXISTING,
+    CONF_BATTERY_BUDGET_START_SOC,
+    CONF_BATTERY_BUDGET_STOP_SOC,
+    CONF_BATTERY_POWER_STRATEGY,
+    CONF_MINIMUM_EXPORT_POWER,
+    DEFAULT_BATTERY_BUDGET_START_SOC,
+    DEFAULT_BATTERY_BUDGET_STOP_SOC,
+    DEFAULT_MINIMUM_EXPORT_POWER,
+    DEFAULT_RAZ_TIME,
+    DEFAULT_REFRESH_PERIOD_SEC,
+    SOLAR_OPTIMIZER_DOMAIN,
+    name_to_unique_id,
+)
 from .managed_device import ManagedDevice
 from .simulated_annealing_algo import SimulatedAnnealingAlgorithm
 
@@ -67,6 +81,11 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         self._last_production: float = 0.0
         self._battery_soc_entity_id: str = None
         self._battery_charge_power_entity_id: str = None
+        self._battery_power_strategy: str = BATTERY_POWER_STRATEGY_EXISTING
+        self._battery_budget_start_soc: float = DEFAULT_BATTERY_BUDGET_START_SOC
+        self._battery_budget_stop_soc: float = DEFAULT_BATTERY_BUDGET_STOP_SOC
+        self._minimum_export_power: float = DEFAULT_MINIMUM_EXPORT_POWER
+        self._battery_budget_active: bool = False
         self._raz_time: time = None
 
         self._central_config_done = False
@@ -109,9 +128,15 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
             self._unsub_events = None
 
         if self._subscribe_to_events:
+            tracked_entities = [
+                self._power_consumption_entity_id,
+                self._power_production_entity_id,
+                config.data.get("battery_soc_entity_id"),
+                config.data.get("battery_charge_power_entity_id"),
+            ]
             self._unsub_events = async_track_state_change_event(
                 self.hass,
-                [self._power_consumption_entity_id, self._power_production_entity_id],
+                [entity_id for entity_id in tracked_entities if entity_id],
                 self._async_on_change)
 
         self._sell_cost_entity_id = config.data.get("sell_cost_entity_id")
@@ -121,6 +146,30 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         self._battery_charge_power_entity_id = config.data.get(
             "battery_charge_power_entity_id"
         )
+        self._battery_power_strategy = config.data.get(
+            CONF_BATTERY_POWER_STRATEGY, BATTERY_POWER_STRATEGY_EXISTING
+        )
+        self._battery_budget_start_soc = float(
+            config.data.get(
+                CONF_BATTERY_BUDGET_START_SOC,
+                DEFAULT_BATTERY_BUDGET_START_SOC,
+            )
+        )
+        self._battery_budget_stop_soc = float(
+            config.data.get(
+                CONF_BATTERY_BUDGET_STOP_SOC,
+                DEFAULT_BATTERY_BUDGET_STOP_SOC,
+            )
+        )
+        self._minimum_export_power = float(
+            config.data.get(
+                CONF_MINIMUM_EXPORT_POWER,
+                DEFAULT_MINIMUM_EXPORT_POWER,
+            )
+        )
+        # If Home Assistant restarts while the SOC is between the thresholds, start
+        # conservatively. The budget opens again only after the upper threshold is met.
+        self._battery_budget_active = False
         self._smooth_production = config.data.get("smooth_production") is True
         self._last_production = 0.0
 
@@ -195,6 +244,22 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
             charge_power if charge_power is not None else 0
         )
 
+        self._update_battery_budget(soc)
+        calculated_data["battery_budget_active"] = self._battery_budget_active
+        calculated_data["battery_power_strategy"] = self._battery_power_strategy
+        calculated_data["minimum_export_power"] = self._minimum_export_power
+        calculated_data["effective_power_consumption"] = (
+            self._effective_power_consumption(
+                calculated_data["power_consumption"],
+                calculated_data["battery_charge_power"],
+            )
+        )
+        calculated_data["usable_excess_power"] = (
+            max(0, -calculated_data["effective_power_consumption"])
+            if calculated_data["effective_power_consumption"] is not None
+            else None
+        )
+
         calculated_data["priority_weight"] = self.priority_weight
 
         #
@@ -202,7 +267,7 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         #
         best_solution, best_objective, total_power = self._algo.recuit_simule(
             self._devices,
-            calculated_data["power_consumption"] + calculated_data["battery_charge_power"],
+            calculated_data["effective_power_consumption"],
             calculated_data["power_production"],
             calculated_data["sell_cost"],
             calculated_data["buy_cost"],
@@ -268,13 +333,56 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
 
         return calculated_data
 
+    def _update_battery_budget(self, battery_soc: float | None) -> None:
+        """Update the battery budget latch using separate start and stop thresholds."""
+        if (
+            self._battery_power_strategy
+            != BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET
+            or battery_soc is None
+        ):
+            self._battery_budget_active = False
+            return
+
+        if battery_soc >= self._battery_budget_start_soc:
+            self._battery_budget_active = True
+        elif battery_soc <= self._battery_budget_stop_soc:
+            self._battery_budget_active = False
+
+    def _effective_power_consumption(
+        self, grid_power: float | None, battery_power: float
+    ) -> float | None:
+        """Return net power presented to the optimizer for the selected policy.
+
+        Grid power is negative while exporting. Battery power is negative while
+        charging and positive while discharging.
+        """
+        if grid_power is None:
+            return None
+
+        if self._battery_power_strategy == BATTERY_POWER_STRATEGY_EXISTING:
+            return grid_power + battery_power
+
+        if (
+            self._battery_power_strategy
+            == BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET
+            and self._battery_budget_active
+        ):
+            # Once opened at the upper SOC threshold, let an already-running load
+            # ride through solar dips using the battery until the lower threshold.
+            return grid_power
+
+        # Reserve all charging power for the battery, while still exposing battery
+        # discharge as a deficit. The margin requires this much real grid export
+        # before a flexible load is considered affordable.
+        return grid_power + max(battery_power, 0) + self._minimum_export_power
+
     @classmethod
     def get_coordinator(cls) -> Any:
         """Get the coordinator from the hass.data"""
         if (
             not hasattr(SolarOptimizerCoordinator, "hass")
             or SolarOptimizerCoordinator.hass is None
-            or SolarOptimizerCoordinator.hass.data[SOLAR_OPTIMIZER_DOMAIN] is None
+            or SolarOptimizerCoordinator.hass.data.get(SOLAR_OPTIMIZER_DOMAIN) is None
         ):
             return None
 
@@ -288,7 +396,7 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         if (
             not hasattr(SolarOptimizerCoordinator, "hass")
             or SolarOptimizerCoordinator.hass is None
-            or SolarOptimizerCoordinator.hass.data[SOLAR_OPTIMIZER_DOMAIN] is None
+            or SolarOptimizerCoordinator.hass.data.get(SOLAR_OPTIMIZER_DOMAIN) is None
         ):
             return
 
