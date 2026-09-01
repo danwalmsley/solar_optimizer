@@ -14,7 +14,7 @@ def create_coordinator(
     hass: HomeAssistant,
     strategy: str,
     minimum_export_power: float = 0,
-    minimum_battery_charge_power: float = 100,
+    maximum_battery_charge_reserve_power: float = 100,
 ) -> SolarOptimizerCoordinator:
     """Create a coordinator configured for a battery policy test."""
     coordinator = SolarOptimizerCoordinator(hass, None)
@@ -23,8 +23,10 @@ def create_coordinator(
     coordinator._battery_budget_start_soc = 100
     coordinator._battery_budget_stop_soc = 90
     coordinator._battery_budget_active = False
-    coordinator._minimum_battery_charge_power = minimum_battery_charge_power
-    coordinator._battery_charge_reserve_start_soc = None
+    coordinator._maximum_battery_charge_reserve_power = (
+        maximum_battery_charge_reserve_power
+    )
+    coordinator._battery_charge_reserve_start_soc = 50
     return coordinator
 
 
@@ -89,7 +91,7 @@ async def test_soc_taper_calculates_2700_watt_reserve_curve(
     coordinator = create_coordinator(
         hass,
         BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
-        minimum_battery_charge_power=2700,
+        maximum_battery_charge_reserve_power=2700,
     )
     coordinator._battery_charge_reserve_start_soc = 50
 
@@ -107,7 +109,7 @@ async def test_soc_taper_calculates_2700_watt_reserve_curve(
         100: 0,
     }
     for soc, expected in expected_reserves.items():
-        assert coordinator._effective_minimum_battery_charge_power(soc) == expected
+        assert coordinator._effective_battery_charge_reserve_power(soc) == expected
 
 
 async def test_soc_taper_reserve_is_a_floor_not_a_charging_cap(
@@ -117,7 +119,7 @@ async def test_soc_taper_reserve_is_a_floor_not_a_charging_cap(
     coordinator = create_coordinator(
         hass,
         BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
-        minimum_battery_charge_power=2700,
+        maximum_battery_charge_reserve_power=2700,
     )
     coordinator._battery_charge_reserve_start_soc = 50
 
@@ -125,20 +127,6 @@ async def test_soc_taper_reserve_is_a_floor_not_a_charging_cap(
     assert coordinator._effective_power_consumption(0, -1100, 90) == -560
     # At 50% the full 2700 W reserve remains in force.
     assert coordinator._effective_power_consumption(0, -1100, 50) == 1600
-
-
-async def test_fixed_reserve_remains_default_without_taper_start(
-    hass: HomeAssistant,
-) -> None:
-    """Existing installations retain the fixed charging floor at every SOC."""
-    coordinator = create_coordinator(
-        hass,
-        BATTERY_POWER_STRATEGY_CHARGE_FIRST,
-        minimum_battery_charge_power=800,
-    )
-
-    assert coordinator._effective_minimum_battery_charge_power(50) == 800
-    assert coordinator._effective_minimum_battery_charge_power(95) == 800
 
 
 async def test_non_budget_strategy_clears_latch(hass: HomeAssistant) -> None:

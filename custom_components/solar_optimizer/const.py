@@ -86,7 +86,7 @@ CONF_BATTERY_SOC_THRESHOLD = "battery_soc_threshold"
 CONF_BATTERY_POWER_STRATEGY = "battery_power_strategy"
 CONF_BATTERY_BUDGET_START_SOC = "battery_budget_start_soc"
 CONF_BATTERY_BUDGET_STOP_SOC = "battery_budget_stop_soc"
-CONF_MINIMUM_BATTERY_CHARGE_POWER = "minimum_battery_charge_power"
+CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER = "maximum_battery_charge_reserve_power"
 CONF_BATTERY_CHARGE_RESERVE_START_SOC = "battery_charge_reserve_start_soc"
 CONF_MINIMUM_EXPORT_POWER = "minimum_export_power"
 CONF_DECISION_REVERSAL_HOLD_SEC = "decision_reversal_hold_sec"
@@ -105,7 +105,8 @@ BATTERY_POWER_STRATEGIES = [
 
 DEFAULT_BATTERY_BUDGET_START_SOC = 100
 DEFAULT_BATTERY_BUDGET_STOP_SOC = 90
-DEFAULT_MINIMUM_BATTERY_CHARGE_POWER = 100
+DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER = 2700
+DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC = 50
 DEFAULT_MINIMUM_EXPORT_POWER = 0
 DEFAULT_DECISION_REVERSAL_HOLD_SEC = 0
 
@@ -299,19 +300,16 @@ def battery_charge_reserve_breakpoints(
 
 def battery_charge_reserve_power(
     maximum_power: float,
-    start_soc: float | None,
+    start_soc: float,
     close_soc: float,
     open_soc: float,
     battery_soc: float | None,
 ) -> float:
     """Calculate the stepped minimum charging reserve for the current SOC.
 
-    A missing taper start preserves the legacy fixed-reserve behavior. Missing
-    SOC data conservatively retains the configured maximum reserve.
+    Missing SOC data conservatively retains the configured maximum reserve.
     """
     maximum_power = max(0.0, float(maximum_power))
-    if start_soc is None:
-        return maximum_power
     if battery_soc is None or battery_soc <= start_soc:
         return maximum_power
     if battery_soc >= open_soc:
