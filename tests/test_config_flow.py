@@ -174,6 +174,7 @@ async def test_default_values_central_config(
     assert data.get(CONF_BATTERY_CHARGE_RESERVE_START_SOC) == 50
     assert data.get(CONF_MINIMUM_EXPORT_POWER) == 0
     assert data.get(CONF_DECISION_REVERSAL_HOLD_SEC) == 0
+    assert data.get(CONF_POWER_DEFICIT_CONFIRMATION_SEC) == 0
 
     assert result["title"] == "Configuration"
 

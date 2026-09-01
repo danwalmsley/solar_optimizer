@@ -196,7 +196,8 @@ You need to specify:
 13. **Charge-priority taper starts at SOC**, the SOC where the full reserve applies. Above this point the reserve decreases in 10-percentage-point steps up to the close-budget SOC, then in 5-point steps up to the open-budget SOC. The settings flow shows the complete calculated curve for review before saving. For example, a 2700 W reserve starting at 50%, closing at 90%, and opening at 100% produces 2700, 2160, 1620, 1080, 540, 270, and 0 W steps. These are minimum targets while flexible loads run, not battery charging caps.
 14. **Minimum export reserve**, additional real grid export in watts that remains reserved before flexible loads are considered while the battery budget is closed. This can normally remain at 0 W when a battery charging floor is configured.
 15. **Opposite decision hold**, a short settling period in seconds after an optimizer on/off command. The first decision is immediate, but its opposite is suppressed until this period expires. This is useful with event recalculation because inverter and grid sensors can briefly show import while a large load starts. Set to 0 to disable; 10 seconds is a good starting point.
-16. **The start time of the day**. At this time, the usage counters of the equipment are reset to zero. The default value is 05:00. Ideally, this should be set before the first production of the day and as late as possible for off-peak activations.
+16. **Power deficit confirmation delay**, the number of seconds an insufficient-power decision must remain continuously true before an already-running, still-usable device is stopped. A recovered surplus cancels the pending stop. The integration schedules a recheck at the deadline, while SOC, maximum-runtime, and usability safety shutdowns remain immediate. It is disabled by default (0 seconds); 10 seconds is a good starting point for loads with short start-up transients.
+17. **The start time of the day**. At this time, the usage counters of the equipment are reset to zero. The default value is 05:00. Ideally, this should be set before the first production of the day and as late as possible for off-peak activations.
 
 When Home Assistant restarts while SOC is between the two battery-budget thresholds, the budget starts closed. It opens again when the upper threshold is reached. A load still needs genuine export to start; once the budget is open, an already-running load may be supported by the battery until the lower threshold.
 
@@ -428,9 +429,10 @@ Once the integration is properly configured, a **device** named `'configuration'
 10. A sensor named `maximum_battery_charge_reserve_power`: the configured maximum battery charging reserve.
 11. A sensor named `effective_battery_charge_reserve_power`: the SOC-adjusted reserve currently enforced.
 12. A sensor named `decision_reversal_hold_sec`: the configured opposite-decision settling period.
-13. A sensor named `battery_power_strategy`: the selected strategy.
-14. A binary sensor named `battery_budget_active`: whether the SOC hysteresis budget is currently open.
-15. A dropdown list named `priority weight` which defines the weight given to priority management compared to solar consumption optimization. See [priority management](#priority-management).
+13. A sensor named `power_deficit_confirmation_sec`: the configured persistent-deficit confirmation period.
+14. A sensor named `battery_power_strategy`: the selected strategy.
+15. A binary sensor named `battery_budget_active`: whether the SOC hysteresis budget is currently open.
+16. A dropdown list named `priority weight` which defines the weight given to priority management compared to solar consumption optimization. See [priority management](#priority-management).
 
 ![Configuration Entities](images/entities-configuration.png)
 

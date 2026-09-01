@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant, Event, EventStateChangedData
 from homeassistant.components.select import SelectEntity
 
 from homeassistant.helpers.event import (
+    async_call_later,
     async_track_state_change_event,
 )
 
@@ -34,12 +35,14 @@ from .const import (
     CONF_DECISION_REVERSAL_HOLD_SEC,
     CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
     CONF_MINIMUM_EXPORT_POWER,
+    CONF_POWER_DEFICIT_CONFIRMATION_SEC,
     DEFAULT_BATTERY_BUDGET_START_SOC,
     DEFAULT_BATTERY_BUDGET_STOP_SOC,
     DEFAULT_DECISION_REVERSAL_HOLD_SEC,
     DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC,
     DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
     DEFAULT_MINIMUM_EXPORT_POWER,
+    DEFAULT_POWER_DEFICIT_CONFIRMATION_SEC,
     DEFAULT_RAZ_TIME,
     DEFAULT_REFRESH_PERIOD_SEC,
     SOLAR_OPTIMIZER_DOMAIN,
@@ -100,7 +103,12 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         )
         self._minimum_export_power: float = DEFAULT_MINIMUM_EXPORT_POWER
         self._decision_reversal_hold_sec: float = DEFAULT_DECISION_REVERSAL_HOLD_SEC
+        self._power_deficit_confirmation_sec: float = (
+            DEFAULT_POWER_DEFICIT_CONFIRMATION_SEC
+        )
         self._last_state_change_command: dict[str, tuple[float, bool, float]] = {}
+        self._pending_power_deficit_off_since: dict[str, float] = {}
+        self._power_deficit_confirmation_unsub = None
         self._battery_budget_active: bool = False
         self._raz_time: time = None
 
@@ -201,7 +209,15 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
                 DEFAULT_DECISION_REVERSAL_HOLD_SEC,
             )
         )
+        self._power_deficit_confirmation_sec = float(
+            config.data.get(
+                CONF_POWER_DEFICIT_CONFIRMATION_SEC,
+                DEFAULT_POWER_DEFICIT_CONFIRMATION_SEC,
+            )
+        )
         self._last_state_change_command.clear()
+        self._cleanup_power_deficit_confirmation()
+        config.async_on_unload(self._cleanup_power_deficit_confirmation)
         # If Home Assistant restarts while the SOC is between the thresholds, start
         # conservatively. The budget opens again only after the upper threshold is met.
         self._battery_budget_active = False
@@ -295,6 +311,9 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         calculated_data["decision_reversal_hold_sec"] = (
             self._decision_reversal_hold_sec
         )
+        calculated_data["power_deficit_confirmation_sec"] = (
+            self._power_deficit_confirmation_sec
+        )
         calculated_data["minimum_charge_constraint_active"] = (
             self._minimum_charge_constraint_active
         )
@@ -330,6 +349,9 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         best_solution, total_power = self._enforce_minimum_charge_constraint(
             best_solution,
             calculated_data["effective_power_consumption"],
+        )
+        best_solution, total_power = self._apply_power_deficit_confirmation(
+            best_solution
         )
         best_solution, total_power = self._apply_decision_reversal_hold(best_solution)
 
@@ -528,6 +550,92 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
 
             if projected_deficit <= 0:
                 break
+
+        return solution, self._algo.consommation_equipements(solution)
+
+    def _cancel_power_deficit_confirmation_refresh(self) -> None:
+        """Cancel a scheduled power-deficit confirmation refresh."""
+        if self._power_deficit_confirmation_unsub is not None:
+            self._power_deficit_confirmation_unsub()
+            self._power_deficit_confirmation_unsub = None
+
+    def _cleanup_power_deficit_confirmation(self) -> None:
+        """Clear pending confirmations and cancel their scheduled refresh."""
+        self._pending_power_deficit_off_since.clear()
+        self._cancel_power_deficit_confirmation_refresh()
+
+    async def _async_power_deficit_confirmation_elapsed(self, _) -> None:
+        """Recalculate when the earliest pending deficit confirmation expires."""
+        self._power_deficit_confirmation_unsub = None
+        await self.async_refresh()
+        self._schedule_refresh()
+
+    def _schedule_power_deficit_confirmation_refresh(
+        self, current_time: float
+    ) -> None:
+        """Schedule a refresh at the earliest pending off-decision deadline."""
+        if not self._pending_power_deficit_off_since:
+            self._cancel_power_deficit_confirmation_refresh()
+            return
+        if self._power_deficit_confirmation_unsub is not None:
+            return
+
+        earliest_started = min(self._pending_power_deficit_off_since.values())
+        delay = max(
+            0.05,
+            self._power_deficit_confirmation_sec
+            - (current_time - earliest_started),
+        )
+        self._power_deficit_confirmation_unsub = async_call_later(
+            self.hass,
+            delay,
+            self._async_power_deficit_confirmation_elapsed,
+        )
+
+    def _apply_power_deficit_confirmation(
+        self,
+        solution: list[dict],
+        now: float | None = None,
+    ) -> tuple[list[dict], float]:
+        """Require a persistent deficit before stopping a usable running device.
+
+        Recovery cancels the pending stop immediately. Devices which are no longer
+        usable still stop immediately because those decisions may represent SOC,
+        maximum-runtime, or user-template safety constraints.
+        """
+        if self._power_deficit_confirmation_sec <= 0:
+            self._pending_power_deficit_off_since.clear()
+            self._cancel_power_deficit_confirmation_refresh()
+            return solution, self._algo.consommation_equipements(solution)
+
+        current_time = monotonic_time.monotonic() if now is None else now
+        solution_names = {equipment["name"] for equipment in solution}
+        for name in list(self._pending_power_deficit_off_since):
+            if name not in solution_names:
+                self._pending_power_deficit_off_since.pop(name, None)
+
+        for equipment in solution:
+            name = equipment["name"]
+            currently_running = equipment.get("current_power", 0) > 0
+            still_usable = equipment.get("is_usable", True)
+
+            if equipment["state"] or not currently_running or not still_usable:
+                self._pending_power_deficit_off_since.pop(name, None)
+                continue
+
+            started = self._pending_power_deficit_off_since.setdefault(
+                name, current_time
+            )
+            if current_time - started < self._power_deficit_confirmation_sec:
+                equipment["state"] = True
+                equipment["requested_power"] = equipment["current_power"]
+                equipment["power_deficit_confirmation_pending"] = True
+            else:
+                self._pending_power_deficit_off_since.pop(name, None)
+
+        # Tests pass an explicit monotonic time and do not need a real HA timer.
+        if now is None:
+            self._schedule_power_deficit_confirmation_refresh(current_time)
 
         return solution, self._algo.consommation_equipements(solution)
 

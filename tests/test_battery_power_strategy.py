@@ -27,6 +27,9 @@ def create_coordinator(
         maximum_battery_charge_reserve_power
     )
     coordinator._battery_charge_reserve_start_soc = 50
+    coordinator._power_deficit_confirmation_sec = 10
+    coordinator._pending_power_deficit_off_since = {}
+    coordinator._power_deficit_confirmation_unsub = None
     return coordinator
 
 
@@ -275,6 +278,78 @@ async def test_reversal_hold_does_not_delay_first_decision(
     assert held[0]["state"] is False
     assert "decision_reversal_held" not in held[0]
     assert total_power == 0
+
+
+def running_device_solution(state: bool, usable: bool = True) -> list[dict]:
+    """Return a proposed state for a fixed device which is currently running."""
+    return [
+        {
+            "name": "Pool Pump",
+            "state": state,
+            "is_usable": usable,
+            "current_power": 1100,
+            "requested_power": 1100 if state else 0,
+        }
+    ]
+
+
+async def test_power_deficit_must_persist_before_running_device_stops(
+    hass: HomeAssistant,
+) -> None:
+    """A usable running device remains on until the confirmation period expires."""
+    coordinator = create_coordinator(hass, BATTERY_POWER_STRATEGY_CHARGE_FIRST)
+
+    held, total_power = coordinator._apply_power_deficit_confirmation(
+        running_device_solution(False), now=100
+    )
+    assert held[0]["state"] is True
+    assert held[0]["power_deficit_confirmation_pending"] is True
+    assert total_power == 1100
+
+    held, _ = coordinator._apply_power_deficit_confirmation(
+        running_device_solution(False), now=109.9
+    )
+    assert held[0]["state"] is True
+
+    confirmed, total_power = coordinator._apply_power_deficit_confirmation(
+        running_device_solution(False), now=110
+    )
+    assert confirmed[0]["state"] is False
+    assert total_power == 0
+
+
+async def test_power_recovery_cancels_pending_stop(hass: HomeAssistant) -> None:
+    """A recovered on decision clears the timer and a later deficit starts over."""
+    coordinator = create_coordinator(hass, BATTERY_POWER_STRATEGY_CHARGE_FIRST)
+
+    coordinator._apply_power_deficit_confirmation(
+        running_device_solution(False), now=100
+    )
+    recovered, _ = coordinator._apply_power_deficit_confirmation(
+        running_device_solution(True), now=105
+    )
+    assert recovered[0]["state"] is True
+    assert coordinator._pending_power_deficit_off_since == {}
+
+    held, _ = coordinator._apply_power_deficit_confirmation(
+        running_device_solution(False), now=106
+    )
+    assert held[0]["state"] is True
+    assert coordinator._pending_power_deficit_off_since["Pool Pump"] == 106
+
+
+async def test_unusable_device_stops_without_deficit_confirmation(
+    hass: HomeAssistant,
+) -> None:
+    """SOC, runtime, and usability safety decisions remain immediate."""
+    coordinator = create_coordinator(hass, BATTERY_POWER_STRATEGY_CHARGE_FIRST)
+
+    stopped, total_power = coordinator._apply_power_deficit_confirmation(
+        running_device_solution(False, usable=False), now=100
+    )
+    assert stopped[0]["state"] is False
+    assert total_power == 0
+    assert coordinator._pending_power_deficit_off_since == {}
 
 
 async def test_reversal_hold_suppresses_off_after_on(
