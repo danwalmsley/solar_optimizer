@@ -32,6 +32,7 @@
                     "battery_budget_stop_soc": "Close battery budget at SOC",
                     "minimum_battery_charge_power": "Minimum battery charging power",
                     "minimum_export_power": "Minimum export reserve",
+                    "decision_reversal_hold_sec": "Opposite decision hold",
                     "raz_time": "Reset counter time"
                 },
                 "data_description": {
@@ -50,6 +51,7 @@
                     "battery_budget_stop_soc": "Lower SOC threshold that closes the battery budget and prevents further flexible-load battery discharge.",
                     "minimum_battery_charge_power": "Minimum charging rate to preserve while the battery budget is closed. Flexible loads may reduce battery charging down to this value, but cannot reduce it further or discharge the battery.",
                     "minimum_export_power": "Extra real grid export required before flexible loads can use surplus while the battery budget is closed.",
+                    "decision_reversal_hold_sec": "Seconds after an optimizer on/off command during which the opposite command is suppressed, allowing inverter and sensor readings to settle. The first decision and repeated decisions in the same direction remain immediate. Set to 0 to disable.",
                     "raz_time": "Time to reset active time counters. Should be before first exposure to sunlight but not too early to allow enough time for night activation"
                 }
             },
@@ -175,6 +177,7 @@
                     "battery_budget_stop_soc": "Close battery budget at SOC",
                     "minimum_battery_charge_power": "Minimum battery charging power",
                     "minimum_export_power": "Minimum export reserve",
+                    "decision_reversal_hold_sec": "Opposite decision hold",
                     "raz_time": "Reset counter time"
                 },
                 "data_description": {
@@ -193,6 +196,7 @@
                     "battery_budget_stop_soc": "Lower SOC threshold that closes the battery budget and prevents further flexible-load battery discharge.",
                     "minimum_battery_charge_power": "Minimum charging rate to preserve while the battery budget is closed. Flexible loads may reduce battery charging down to this value, but cannot reduce it further or discharge the battery.",
                     "minimum_export_power": "Extra real grid export required before flexible loads can use surplus while the battery budget is closed.",
+                    "decision_reversal_hold_sec": "Seconds after an optimizer on/off command during which the opposite command is suppressed, allowing inverter and sensor readings to settle. The first decision and repeated decisions in the same direction remain immediate. Set to 0 to disable.",
                     "raz_time": "Time to reset active time counters. Should be before first exposure to sunlight but not too early to allow enough time for night activation"
                 }
             },

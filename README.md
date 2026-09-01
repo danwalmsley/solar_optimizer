@@ -194,7 +194,8 @@ You need to specify:
 11. **Close battery budget at SOC**, the lower threshold that closes it (for example, 90%). The two thresholds form a stateful hysteresis band rather than a single cycling boundary.
 12. **Minimum battery charging power**, the charging rate in watts that flexible loads must preserve while the battery budget is closed. Flexible loads may consume the rest of the charging power, but a deterministic safety pass sheds flexible load before charging falls below this value. Start with 100-200 W for an on/off load.
 13. **Minimum export reserve**, additional real grid export in watts that remains reserved before flexible loads are considered while the battery budget is closed. This can normally remain at 0 W when a battery charging floor is configured.
-14. **The start time of the day**. At this time, the usage counters of the equipment are reset to zero. The default value is 05:00. Ideally, this should be set before the first production of the day and as late as possible for off-peak activations.
+14. **Opposite decision hold**, a short settling period in seconds after an optimizer on/off command. The first decision is immediate, but its opposite is suppressed until this period expires. This is useful with event recalculation because inverter and grid sensors can briefly show import while a large load starts. Set to 0 to disable; 10 seconds is a good starting point.
+15. **The start time of the day**. At this time, the usage counters of the equipment are reset to zero. The default value is 05:00. Ideally, this should be set before the first production of the day and as late as possible for off-peak activations.
 
 When Home Assistant restarts while SOC is between the two battery-budget thresholds, the budget starts closed. It opens again when the upper threshold is reached. A load still needs genuine export to start; once the budget is open, an already-running load may be supported by the battery until the lower threshold.
 
@@ -424,9 +425,10 @@ Once the integration is properly configured, a **device** named `'configuration'
 8. A sensor named `usable_excess_power`: the non-negative surplus currently available to flexible loads after policy and margin adjustments.
 9. A sensor named `minimum_export_power`: the configured export reserve.
 10. A sensor named `minimum_battery_charge_power`: the configured battery charging floor.
-11. A sensor named `battery_power_strategy`: the selected strategy.
-12. A binary sensor named `battery_budget_active`: whether the SOC hysteresis budget is currently open.
-13. A dropdown list named `priority weight` which defines the weight given to priority management compared to solar consumption optimization. See [priority management](#priority-management).
+11. A sensor named `decision_reversal_hold_sec`: the configured opposite-decision settling period.
+12. A sensor named `battery_power_strategy`: the selected strategy.
+13. A binary sensor named `battery_budget_active`: whether the SOC hysteresis budget is currently open.
+14. A dropdown list named `priority weight` which defines the weight given to priority management compared to solar consumption optimization. See [priority management](#priority-management).
 
 ![Configuration Entities](images/entities-configuration.png)
 

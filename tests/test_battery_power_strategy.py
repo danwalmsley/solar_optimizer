@@ -200,3 +200,97 @@ async def test_open_budget_bypasses_charging_floor(hass: HomeAssistant) -> None:
 
     assert constrained[0]["state"] is True
     assert total_power == 1100
+
+
+def fixed_load_solution(state: bool, requested_power: float) -> list[dict]:
+    """Return a fixed-load optimizer solution for reversal-hold tests."""
+    return [
+        {
+            "name": "Pool Pump",
+            "state": state,
+            "current_power": 1100 if state else 0,
+            "requested_power": requested_power,
+        }
+    ]
+
+
+async def test_reversal_hold_does_not_delay_first_decision(
+    hass: HomeAssistant,
+) -> None:
+    """Without a previous command, an initial on or off decision is immediate."""
+    coordinator = create_coordinator(hass, BATTERY_POWER_STRATEGY_CHARGE_FIRST)
+    coordinator._decision_reversal_hold_sec = 10
+    solution = fixed_load_solution(False, 0)
+
+    held, total_power = coordinator._apply_decision_reversal_hold(solution, now=105)
+
+    assert held[0]["state"] is False
+    assert "decision_reversal_held" not in held[0]
+    assert total_power == 0
+
+
+async def test_reversal_hold_suppresses_off_after_on(
+    hass: HomeAssistant,
+) -> None:
+    """A transient deficit cannot reverse a recent activation."""
+    coordinator = create_coordinator(hass, BATTERY_POWER_STRATEGY_CHARGE_FIRST)
+    coordinator._decision_reversal_hold_sec = 10
+    coordinator._last_state_change_command["Pool Pump"] = (100, True, 1100)
+    solution = fixed_load_solution(False, 0)
+
+    held, total_power = coordinator._apply_decision_reversal_hold(solution, now=105)
+
+    assert held[0]["state"] is True
+    assert held[0]["requested_power"] == 1100
+    assert held[0]["decision_reversal_held"] is True
+    assert total_power == 1100
+
+
+async def test_reversal_hold_suppresses_on_after_off(
+    hass: HomeAssistant,
+) -> None:
+    """Surplus returning immediately cannot reverse a recent deactivation."""
+    coordinator = create_coordinator(hass, BATTERY_POWER_STRATEGY_CHARGE_FIRST)
+    coordinator._decision_reversal_hold_sec = 10
+    coordinator._last_state_change_command["Pool Pump"] = (100, False, 0)
+    solution = fixed_load_solution(True, 1100)
+
+    held, total_power = coordinator._apply_decision_reversal_hold(solution, now=109.9)
+
+    assert held[0]["state"] is False
+    assert held[0]["requested_power"] == 0
+    assert held[0]["decision_reversal_held"] is True
+    assert total_power == 0
+
+
+async def test_reversal_is_allowed_at_hold_expiry(hass: HomeAssistant) -> None:
+    """The opposite decision is allowed as soon as the hold reaches its limit."""
+    coordinator = create_coordinator(hass, BATTERY_POWER_STRATEGY_CHARGE_FIRST)
+    coordinator._decision_reversal_hold_sec = 10
+    coordinator._last_state_change_command["Pool Pump"] = (100, True, 1100)
+    solution = fixed_load_solution(False, 0)
+
+    held, total_power = coordinator._apply_decision_reversal_hold(solution, now=110)
+
+    assert held[0]["state"] is False
+    assert "decision_reversal_held" not in held[0]
+    assert total_power == 0
+
+
+async def test_same_command_is_not_repeated_while_state_settles(
+    hass: HomeAssistant,
+) -> None:
+    """A lagging switch state cannot reset the hold timer on every event."""
+    coordinator = create_coordinator(hass, BATTERY_POWER_STRATEGY_CHARGE_FIRST)
+    coordinator._decision_reversal_hold_sec = 10
+    coordinator._last_state_change_command["Pool Pump"] = (100, True, 1100)
+
+    assert coordinator._is_recent_state_change_command(
+        "Pool Pump", True, now=105
+    )
+    assert not coordinator._is_recent_state_change_command(
+        "Pool Pump", False, now=105
+    )
+    assert not coordinator._is_recent_state_change_command(
+        "Pool Pump", True, now=110
+    )
