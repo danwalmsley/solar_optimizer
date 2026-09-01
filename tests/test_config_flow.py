@@ -167,8 +167,42 @@ async def test_default_values_central_config(
 
     assert data["smooth_production"]
     assert data.get("battery_soc_entity_id") is None
+    assert data.get(CONF_BATTERY_POWER_STRATEGY) == BATTERY_POWER_STRATEGY_EXISTING
+    assert data.get(CONF_BATTERY_BUDGET_START_SOC) == 100
+    assert data.get(CONF_BATTERY_BUDGET_STOP_SOC) == 90
+    assert data.get(CONF_MINIMUM_EXPORT_POWER) == 0
 
     assert result["title"] == "Configuration"
+
+
+async def test_invalid_battery_budget_thresholds(
+    hass: HomeAssistant, skip_hass_states_get, reset_coordinator
+):
+    """The close threshold must be lower than the open threshold."""
+    result = await hass.config_entries.flow.async_init(
+        config_flow.DOMAIN, context={"source": "user"}
+    )
+
+    user_input = {
+        CONF_POWER_CONSUMPTION_ENTITY_ID: "input_number.power_consumption",
+        CONF_POWER_PRODUCTION_ENTITY_ID: "input_number.power_production",
+        CONF_SELL_COST_ENTITY_ID: "input_number.sell_cost",
+        CONF_BUY_COST_ENTITY_ID: "input_number.buy_cost",
+        CONF_SELL_TAX_PERCENT_ENTITY_ID: "input_number.tax_percent",
+        CONF_BATTERY_POWER_STRATEGY: BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
+        CONF_BATTERY_BUDGET_START_SOC: 90,
+        CONF_BATTERY_BUDGET_STOP_SOC: 90,
+    }
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], user_input=user_input
+    )
+
+    assert result["step_id"] == "device_central"
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {
+        CONF_BATTERY_BUDGET_STOP_SOC: "battery_budget_invalid"
+    }
 
 
 async def test_wrong_raz_time(

@@ -64,6 +64,8 @@ class SolarOptimizerBaseConfigFlow(FlowHandler):
                 errors[str(err)] = "unknown_entity"
             except InvalidTime as err:
                 errors[str(err)] = "format_time_invalid"
+            except InvalidBatteryBudget as err:
+                errors[str(err)] = "battery_budget_invalid"
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
@@ -131,6 +133,25 @@ class SolarOptimizerBaseConfigFlow(FlowHandler):
                     validate_time_format(d)
             except vol.Invalid as err:
                 raise InvalidTime(conf)
+
+        if (
+            data.get(CONF_BATTERY_POWER_STRATEGY)
+            == BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET
+        ):
+            start_soc = float(
+                data.get(
+                    CONF_BATTERY_BUDGET_START_SOC,
+                    DEFAULT_BATTERY_BUDGET_START_SOC,
+                )
+            )
+            stop_soc = float(
+                data.get(
+                    CONF_BATTERY_BUDGET_STOP_SOC,
+                    DEFAULT_BATTERY_BUDGET_STOP_SOC,
+                )
+            )
+            if start_soc <= stop_soc:
+                raise InvalidBatteryBudget(CONF_BATTERY_BUDGET_STOP_SOC)
 
     async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
         """Handle the flow steps user"""
