@@ -6,7 +6,7 @@
 
 ![Icon](https://github.com/jmcollin78/solar_optimizer/blob/main/images/icon.png?raw=true)
 
-> This fork adds battery charge-priority and SOC-hysteresis controls while retaining the upstream behavior as the default.
+> **Version 4.0.0: surplus-only control.** Household demand and battery charging take priority. Flexible loads cannot deliberately spend stored battery energy. This replaces all previous battery-policy modes.
 
 > ![Tip](https://github.com/jmcollin78/solar_optimizer/blob/main/images/tips.png?raw=true) This integration allows you to optimize the use of your solar energy. It controls the switching on and off of your equipment, the activation of which is deferred over time depending on production and current electricity consumption.
 
@@ -62,6 +62,7 @@
 
 
 >![New](https://github.com/jmcollin78/solar_optimizer/blob/main/images/new-icon.png?raw=true) _*News*_
+> * **release 4.0.0**: one surplus-only policy, one 10-second switching stability interval, automatic configuration migration, and diagnostic decision reasons. No SOC battery-spending budget or sunset settings.
 > * **release 3.8.1**:
 >   - **Timed forced activation**: new duration selector (1h, 4h, 12h, 24h) next to the START button. When a duration is selected, the device is switched on in MANUAL mode for the chosen duration, then automatically turns off and returns control to SO. The timer is persisted across HA restarts. See [start\_device](#start_device) and [stop\_device](#stop_device)
 > * **release 3.8.0**:
@@ -98,8 +99,10 @@ The operation is as follows:
 The algorithm used is a simulated annealing type algorithm, a description of which you will find here: https://fr.wikipedia.org/wiki/Recuit_simul%C3%A9
 
 ## Anti-flickering
-To avoid the effects of flickering from one cycle to another, a minimum activation delay can be configured by equipment: `duration_min`. For example: a water heater must be activated for at least one hour for the ignition to be useful, charging an electric car must last at least two hours, ...
-Similarly, a minimum stop duration can be specified in the `duration_stop_min` parameter.
+
+The **Switching stability interval** (default 10 seconds) confirms continuous surplus before starting/increasing a load, and continuous shortage before stopping/reducing it. It also allows each command to settle; these clocks overlap rather than adding two consecutive delays. A timer recalculates even without new sensor events.
+
+A confirmed shortage overrides preferred minimum-on time. Minimum-off times and variable-power adjustment intervals remain respected; if a reduction is necessary during a power-adjustment lock, the device stops instead. SOC, usability-template and maximum-runtime stops are immediate. These software settings are not equipment safety interlocks.
 
 ## Usability
 Each configured device is associated with a switch-type entity named `enable` that authorizes the algorithm to use the device. If I want to force the heating of the hot water tank, I put its switch to off. The algorithm will therefore not look at it, the water heater switches back to manual, not managed by Solar Optimizer.
@@ -110,7 +113,7 @@ If a battery is specified when configuring the integration and if the threshold 
 
 A maximum daily usage time is optionally configurable. If it is valued and if the duration of use of the equipment is exceeded, then the equipment will not be usable by the algorithm and therefore leaves power for other equipment.
 
-A minimum daily usage time is also optionally configurable. This parameter ensures that the equipment will be on for a certain minimum duration. You specify at what time the off-peak hours start (`offpeak_time`) and the minimum duration in minutes (`min_on_time_per_day_min`). If at the time indicated by `offpeak_time`, the minimum activation duration has not been reached, then the equipment is activated until the change of day (configurable in the integration and 05:00 by default) or until the maximum usage is reached (`max_on_time_per_day_min`) or during all the off-peak hours if `max_on_time_per_day_min` is not set. This ensures that the water heater or the car will be charged the next morning even if the solar production has not allowed the device to be recharged. It is up to you to invent the uses of this function.
+Minimum daily runtime and off-peak preferences cannot force automatic operation without surplus. Explicit manual/forced operation is the opt-in exception: such loads are outside optimizer control and can use grid/battery energy.
 
 These 5 rules allow the algorithm to only order what is really useful at a time t. These rules are re-evaluated at each cycle.
 
@@ -118,29 +121,22 @@ These 5 rules allow the algorithm to only order what is really useful at a time 
 Priority management is described [here](#priority-management).
 
 ## Setting Purchase and Resale Costs
-The behavior of the algorithm is strongly influenced by the values of the sensors **"imported kWh cost"** and **"exported kWh cost"**.
-The algorithm calculates the *"fictitious cost"* of a combination of on/off states and desired power levels for the controlled devices.
 
-If these two values are equal, then the cost of importing 500 W from the grid will be the same as the cost of exporting 500 W to the grid.
-Therefore, SO can either reject the 500 W (under-consumption) or import 500 W (over-consumption), as long as production allows.
-
-The values of the purchase and resale cost sensors should be set as follows:
-
-1. **If they are equal** → SO will accept import and export equally. For SO, it “costs” the same to export 500 W as to import 500 W.
-2. **If purchase cost >> resale cost** → SO will minimize import but may export more (energy lost).
-3. **If resale cost >> purchase cost** → the opposite happens: SO will minimize export and potentially import more (thus increasing the bill).
-
-👉 If you want to avoid any import (i.e., buying from the grid): set the purchase cost **much higher** than the resale cost.
-
-👉 For those with self-consumption contracts without resale: everything rejected is lost. In this case, you may want to minimize rejections, even if it means importing a bit more. For this configuration, set resale cost **much higher** than purchase cost.
-
-On my side, I set the actual purchase costs (which vary depending on the day and time: Tempo contract) and the real resale cost of 13 cts/kWh.
-So, if my purchase cost is low (off-peak blue hours), I can import more.
-If the purchase cost is very high (peak red hours), I won’t import at all. That’s exactly what I want in my case — but that’s specific to me and because I have a resale contract at 13 cts/kWh.
-
-**⚠️ WARNING:** Costs must not be zero!
+Tariffs and priorities still guide the existing simulated-annealing load selector, but the final surplus constraint applies regardless of price. Set tariffs to representative positive values; nonpositive values retain the upstream normalization. Missing tariff data prevents new optimized allocations, but protection of existing loads still runs.
 
 # Installation
+
+## Updating this fork to 4.0.0
+
+Back up Home Assistant first. In HACS, verify the repository is **danwalmsley/solar_optimizer**, not the upstream repository. Update/redownload **4.0.0**, then restart Home Assistant. Do not delete and recreate the integration.
+
+Configuration migration preserves devices, sensors, charging reserve and export margin. It removes legacy strategy/open/close-SOC/timing fields and initializes **Switching stability interval** to **10 seconds**. The old budget and timer diagnostic entities are retired; update dashboards that referenced them. Existing device/entity identifiers otherwise remain unchanged.
+
+In the integration's common options, check both battery power and SOC sensors (leave both empty only when no battery exists). Review the calculated reserve table. Device power values must reflect actual operating demand: fixed loads use configured power and variable loads use their existing setpoint conversion, not an independent energy meter.
+
+Commission with History: verify a short import/discharge transient does not stop the pool; a sustained shortage does after the interval; then stable surplus permits restart after any minimum-off period. Inspect `sensor.solar_optimizer_available_controlled_load_budget` and its `device_decisions` attribute for the reason and pending deadline. Unavailable required readings block starts and stop managed loads after the stability interval. At full SOC, zero battery charging is normal and surplus remains usable.
+
+This preserves battery energy from discretionary loads; it cannot guarantee 100% SOC at sunset. The house may still discharge the battery, and the inverter/BMS may decline charging.
 
 ## Migration Procedure from Version 2.x to 3.x
 
@@ -158,7 +154,7 @@ Installing v3.0.0 requires recreating all devices through the UI and removing th
 
 ## HACS installation (recommended)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=jmcollin78&repository=solar_optimizer&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=danwalmsley&repository=solar_optimizer&category=integration)
 
 1. Install [HACS](https://hacs.xyz/). This way you get updates automatically.
 2. Add this Github repo as a custom repo in HACS settings.
@@ -185,23 +181,23 @@ You need to specify:
 5. A sensor or `input_number` that provides **the price of exported kWh** (required: strictly positive number). If there is no resale contract, the same value/sensor as the imported cost can be used. Do not set it to 0, as it would distort the algorithm.
 6. A sensor or `input_number` that provides **the applicable tax rate on exported kWh** as a percentage (positive number or 0 if you do not resell or do not know this value). This value depends on your contract. It is not critical to the algorithm, so a value of 0 is perfectly fine.
 7. An optional sensor that provides **the charge level of a possible solar battery** in percentage. If your solar installation does not include a battery, leave this field empty.
-8. A sensor that provides **the net instantaneous charging power of the battery**. It must be expressed in watt and should be negative when the battery is charging and positive when the battery is discharging. This value will be added to the net consumed power. If the net consumed power is -1000 W (selling 1000 W) but the battery is charging at -500 W, it means that the surplus available for the algorithm is 1500 W.
-9. A **battery power strategy**:
-   - **Existing behavior** preserves the upstream calculation and treats battery charging as available surplus.
-   - **Charge battery first** preserves the configured minimum battery charging power and counts battery discharge as a deficit.
-   - **Charge first with battery budget** enforces the same charging floor until the upper SOC threshold is reached. It then lets an already-running flexible load ride through solar dips using the battery until the lower SOC threshold is reached.
-10. **Open battery budget at SOC**, the upper threshold that opens the battery budget (for example, 100%).
-11. **Close battery budget at SOC**, the lower threshold that closes it (for example, 90%). The two thresholds form a stateful hysteresis band rather than a single cycling boundary.
-12. **Maximum charge-priority reserve**, the charging rate in watts that flexible loads must preserve at and below the taper-start SOC.
-13. **Charge-priority taper starts at SOC**, the SOC where the full reserve applies. Above this point the reserve decreases in 10-percentage-point steps up to the close-budget SOC, then in 5-point steps up to the open-budget SOC. The settings flow shows the complete calculated curve for review before saving. For example, a 2700 W reserve starting at 50%, closing at 90%, and opening at 100% produces 2700, 2160, 1620, 1080, 540, 270, and 0 W steps. These are minimum targets while flexible loads run, not battery charging caps.
-14. **Minimum export reserve**, additional real grid export in watts that remains reserved before flexible loads are considered while the battery budget is closed. This can normally remain at 0 W when a battery charging floor is configured.
-15. **Opposite decision hold**, a short settling period in seconds after an optimizer on/off command. The first decision is immediate, but its opposite is suppressed until this period expires. This is useful with event recalculation because inverter and grid sensors can briefly show import while a large load starts. Set to 0 to disable; 10 seconds is a good starting point.
-16. **Power deficit confirmation delay**, the number of seconds an insufficient-power decision must remain continuously true before an already-running, still-usable device is stopped. A recovered surplus cancels the pending stop. The integration schedules a recheck at the deadline, while SOC, maximum-runtime, and usability safety shutdowns remain immediate. It is disabled by default (0 seconds); 10 seconds is a good starting point for loads with short start-up transients.
-17. **The start time of the day**. At this time, the usage counters of the equipment are reset to zero. The default value is 05:00. Ideally, this should be set before the first production of the day and as late as possible for off-peak activations.
+8. A sensor that provides **the net instantaneous charging power of the battery**, negative when charging and positive when discharging. For example, -1000 W grid power plus -500 W battery power means 1500 W is available **before** subtracting the charging reserve and export headroom. Configure both battery power and SOC for a battery installation.
+9. **Maximum charge-priority reserve** (default 2700 W): solar power left available for charging at and below the taper-start SOC, not a required measured charging rate or a battery charging cap.
+10. **Charge-priority taper starts at SOC** (default 50%): reserve decreases in 10-point steps to 90%, then 5-point steps to zero at 100%. A 2700 W reserve starting at 50% gives 2700/2160/1620/1080/540/270/0 W at 50/60/70/80/90/95/100%. Review the calculated table before saving.
+11. **Minimum export reserve** (default 0 W): additional solar headroom after the charging reserve.
+12. **Switching stability interval** (default 10 seconds, range 0–300): one confirmation/settling interval; zero disables it.
+13. **Reset counter time**: daily usage-counter reset, normally 05:00.
 
-When Home Assistant restarts while SOC is between the two battery-budget thresholds, the budget starts closed. It opens again when the upper threshold is reached. A load still needs genuine export to start; once the budget is open, an already-running load may be supported by the battery until the lower threshold.
+Battery SOC and signed battery power must both be configured for a battery installation. An unavailable configured sensor is never treated as zero. Without a battery, both battery power and charging reserve are zero. A full battery reporting zero charging, or an inverter temporarily refusing charging, does not block loads when the available solar covers the configured reserve plus those loads.
 
-Except for the solar battery charge level, these parameters are essential for the algorithm to function, so they are all mandatory. Using sensors or `input_number` allows values to be updated in real-time at each cycle. Consequently, when off-peak hours begin, the calculation may change, impacting the state of the equipment as importing energy becomes cheaper. Everything is dynamic and recalculated in each cycle.
+The prospective balance is:
+
+```text
+grid + battery + charging reserve + export headroom
++ proposed controlled load - current controlled load
+```
+
+Grid import and battery discharge are positive. Export and charging are negative. New allocations must have a balance at or below zero. If household demand alone exceeds solar, managed loads stay off but the battery can still serve the house. Pending shutdowns and unacknowledged starts cannot fund other loads.
 
 ## Configure the Devices
 Each controllable device must be configured by adding a new integration via the "Add a device" button available on the integration page:
@@ -428,11 +424,10 @@ Once the integration is properly configured, a **device** named `'configuration'
 9. A sensor named `minimum_export_power`: the configured export reserve.
 10. A sensor named `maximum_battery_charge_reserve_power`: the configured maximum battery charging reserve.
 11. A sensor named `effective_battery_charge_reserve_power`: the SOC-adjusted reserve currently enforced.
-12. A sensor named `decision_reversal_hold_sec`: the configured opposite-decision settling period.
-13. A sensor named `power_deficit_confirmation_sec`: the configured persistent-deficit confirmation period.
-14. A sensor named `battery_power_strategy`: the selected strategy.
-15. A binary sensor named `battery_budget_active`: whether the SOC hysteresis budget is currently open.
-16. A dropdown list named `priority weight` which defines the weight given to priority management compared to solar consumption optimization. See [priority management](#priority-management).
+12. A sensor named `switching_stability_sec`: the unified confirmation/settling interval.
+13. A sensor named `available_controlled_load_budget`: total solar budget for managed loads, including those already running. Its `device_decisions` attribute exposes per-device reasons and pending timestamps.
+14. A sensor named `projected_shortfall`: remaining deficit with commanded allocations. May remain positive during grace periods or when the house alone needs battery/grid support.
+15. A dropdown list named `priority weight` which defines the weight given to priority management compared to solar consumption optimization. See [priority management](#priority-management).
 
 ![Configuration Entities](images/entities-configuration.png)
 

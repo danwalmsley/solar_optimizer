@@ -111,6 +111,9 @@ async def init_solar_optimizer_central_config(hass):
         data={
             CONF_NAME: "Configuration",
             CONF_REFRESH_PERIOD_SEC: 60,
+            # Legacy algorithm tests isolate selection; timing/reserve have dedicated tests.
+            CONF_SWITCHING_STABILITY_SEC: 0,
+            CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER: 0,
             CONF_DEVICE_TYPE: CONF_DEVICE_CENTRAL,
             CONF_POWER_CONSUMPTION_ENTITY_ID: "sensor.fake_power_consumption",
             CONF_POWER_PRODUCTION_ENTITY_ID: "sensor.fake_power_production",

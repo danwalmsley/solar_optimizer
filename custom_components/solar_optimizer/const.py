@@ -13,7 +13,6 @@ from homeassistant.helpers.template import Template, is_template_string
 
 SOLAR_OPTIMIZER_DOMAIN = DOMAIN = "solar_optimizer"
 PLATFORMS: list[Platform] = [
-    Platform.BINARY_SENSOR,
     Platform.SENSOR,
     Platform.SWITCH,
     Platform.SELECT,
@@ -47,7 +46,7 @@ SERVICE_STOP_DEVICE = "stop_device"
 
 TIME_REGEX = r"^(?:[01]\d|2[0-3]):[0-5]\d$"
 CONFIG_VERSION = 2
-CONFIG_MINOR_VERSION = 1
+CONFIG_MINOR_VERSION = 2
 
 CONF_DEVICE_TYPE = "device_type"
 CONF_DEVICE_CENTRAL = "central_config"
@@ -83,34 +82,18 @@ CONF_RAZ_TIME = "raz_time"
 CONF_BATTERY_SOC_ENTITY_ID = "battery_soc_entity_id"
 CONF_BATTERY_CHARGE_POWER_ENTITY_ID = "battery_charge_power_entity_id"
 CONF_BATTERY_SOC_THRESHOLD = "battery_soc_threshold"
-CONF_BATTERY_POWER_STRATEGY = "battery_power_strategy"
-CONF_BATTERY_BUDGET_START_SOC = "battery_budget_start_soc"
-CONF_BATTERY_BUDGET_STOP_SOC = "battery_budget_stop_soc"
 CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER = "maximum_battery_charge_reserve_power"
 CONF_BATTERY_CHARGE_RESERVE_START_SOC = "battery_charge_reserve_start_soc"
 CONF_MINIMUM_EXPORT_POWER = "minimum_export_power"
-CONF_DECISION_REVERSAL_HOLD_SEC = "decision_reversal_hold_sec"
-CONF_POWER_DEFICIT_CONFIRMATION_SEC = "power_deficit_confirmation_sec"
+CONF_SWITCHING_STABILITY_SEC = "switching_stability_sec"
 CONF_MAX_ON_TIME_PER_DAY_MIN = "max_on_time_per_day_min"
 CONF_MIN_ON_TIME_PER_DAY_MIN = "min_on_time_per_day_min"
 CONF_OFFPEAK_TIME = "offpeak_time"
 
-BATTERY_POWER_STRATEGY_EXISTING = "existing"
-BATTERY_POWER_STRATEGY_CHARGE_FIRST = "charge_first"
-BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET = "charge_first_with_budget"
-BATTERY_POWER_STRATEGIES = [
-    BATTERY_POWER_STRATEGY_EXISTING,
-    BATTERY_POWER_STRATEGY_CHARGE_FIRST,
-    BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
-]
-
-DEFAULT_BATTERY_BUDGET_START_SOC = 100
-DEFAULT_BATTERY_BUDGET_STOP_SOC = 90
 DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER = 2700
 DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC = 50
 DEFAULT_MINIMUM_EXPORT_POWER = 0
-DEFAULT_DECISION_REVERSAL_HOLD_SEC = 0
-DEFAULT_POWER_DEFICIT_CONFIRMATION_SEC = 0
+DEFAULT_SWITCHING_STABILITY_SEC = 10
 
 PRIORITY_WEIGHT_NULL = "None"
 PRIORITY_WEIGHT_LOW = "Low"
@@ -261,67 +244,29 @@ class InvalidTime(HomeAssistantError):
     """Error to indicate the give time is invalid"""
 
 
-class InvalidBatteryBudget(HomeAssistantError):
-    """Error to indicate invalid battery budget hysteresis thresholds."""
-
-
 class InvalidBatteryChargeReserve(HomeAssistantError):
     """Error to indicate invalid battery charge-reserve taper thresholds."""
 
 
-def battery_charge_reserve_breakpoints(
-    start_soc: float,
-    close_soc: float,
-    open_soc: float,
-) -> list[float]:
-    """Return SOC boundaries for the stepped charge-reserve curve.
-
-    The curve advances in 10 percentage-point steps up to the budget-close SOC,
-    then in 5 percentage-point steps up to the budget-open SOC.
-    """
+def battery_charge_reserve_breakpoints(start_soc: float) -> list[float]:
+    """Ten-point steps below 90%, five-point steps above; always end at 100%."""
     points = [float(start_soc)]
-
     point = float(start_soc) + 10
-    while point < close_soc:
+    while point < 90:
         points.append(point)
         point += 10
-
-    if close_soc > start_soc and close_soc < open_soc and points[-1] != close_soc:
-        points.append(float(close_soc))
-
-    point = float(close_soc) + 5
-    while point < open_soc:
-        points.append(point)
-        point += 5
-
-    if points[-1] != open_soc:
-        points.append(float(open_soc))
-
+    points.extend(point for point in (90.0, 95.0, 100.0) if point > start_soc)
     return points
 
 
 def battery_charge_reserve_power(
-    maximum_power: float,
-    start_soc: float,
-    close_soc: float,
-    open_soc: float,
-    battery_soc: float | None,
+    maximum_power: float, start_soc: float, battery_soc: float | None,
 ) -> float:
-    """Calculate the stepped minimum charging reserve for the current SOC.
-
-    Missing SOC data conservatively retains the configured maximum reserve.
-    """
+    """Solar reserved for charging, not a requirement for actual charge acceptance."""
     maximum_power = max(0.0, float(maximum_power))
     if battery_soc is None or battery_soc <= start_soc:
         return maximum_power
-    if battery_soc >= open_soc:
+    if battery_soc >= 100:
         return 0.0
-
-    boundaries = battery_charge_reserve_breakpoints(
-        start_soc, close_soc, open_soc
-    )
-    active_boundary = max(point for point in boundaries if point <= battery_soc)
-    reserve = maximum_power * (open_soc - active_boundary) / (
-        open_soc - start_soc
-    )
-    return max(0.0, reserve)
+    boundary = max(point for point in battery_charge_reserve_breakpoints(start_soc) if point <= battery_soc)
+    return maximum_power * (100 - boundary) / (100 - start_soc)

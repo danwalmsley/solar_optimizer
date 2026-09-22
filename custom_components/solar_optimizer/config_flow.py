@@ -64,8 +64,6 @@ class SolarOptimizerBaseConfigFlow(FlowHandler):
                 errors[str(err)] = "unknown_entity"
             except InvalidTime as err:
                 errors[str(err)] = "format_time_invalid"
-            except InvalidBatteryBudget as err:
-                errors[str(err)] = "battery_budget_invalid"
             except InvalidBatteryChargeReserve as err:
                 errors[str(err)] = "battery_charge_reserve_invalid"
             except Exception:  # pylint: disable=broad-except
@@ -136,56 +134,12 @@ class SolarOptimizerBaseConfigFlow(FlowHandler):
             except vol.Invalid as err:
                 raise InvalidTime(conf)
 
-        if (
-            data.get(CONF_BATTERY_POWER_STRATEGY)
-            == BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET
-        ):
-            start_soc = float(
-                data.get(
-                    CONF_BATTERY_BUDGET_START_SOC,
-                    DEFAULT_BATTERY_BUDGET_START_SOC,
-                )
-            )
-            stop_soc = float(
-                data.get(
-                    CONF_BATTERY_BUDGET_STOP_SOC,
-                    DEFAULT_BATTERY_BUDGET_STOP_SOC,
-                )
-            )
-            if start_soc <= stop_soc:
-                raise InvalidBatteryBudget(CONF_BATTERY_BUDGET_STOP_SOC)
-
-        reserve_start_soc = data.get(
+        start = float(data.get(
             CONF_BATTERY_CHARGE_RESERVE_START_SOC,
-            self._infos.get(
-                CONF_BATTERY_CHARGE_RESERVE_START_SOC,
-                DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC,
-            ),
-        )
-        if reserve_start_soc is not None:
-            reserve_start_soc = float(reserve_start_soc)
-            open_soc = float(
-                data.get(
-                    CONF_BATTERY_BUDGET_START_SOC,
-                    self._infos.get(
-                        CONF_BATTERY_BUDGET_START_SOC,
-                        DEFAULT_BATTERY_BUDGET_START_SOC,
-                    ),
-                )
-            )
-            close_soc = float(
-                data.get(
-                    CONF_BATTERY_BUDGET_STOP_SOC,
-                    self._infos.get(
-                        CONF_BATTERY_BUDGET_STOP_SOC,
-                        DEFAULT_BATTERY_BUDGET_STOP_SOC,
-                    ),
-                )
-            )
-            if not reserve_start_soc < close_soc < open_soc:
-                raise InvalidBatteryChargeReserve(
-                    CONF_BATTERY_CHARGE_RESERVE_START_SOC
-                )
+            self._infos.get(CONF_BATTERY_CHARGE_RESERVE_START_SOC, DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC),
+        ))
+        if not 0 <= start < 100:
+            raise InvalidBatteryChargeReserve(CONF_BATTERY_CHARGE_RESERVE_START_SOC)
 
     async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
         """Handle the flow steps user"""
@@ -231,11 +185,8 @@ class SolarOptimizerBaseConfigFlow(FlowHandler):
         self, user_input: dict | None = None
     ) -> FlowResult:
         """Preview the configured SOC charge-reserve curve before saving."""
-        start_soc = self._infos.get(CONF_BATTERY_CHARGE_RESERVE_START_SOC)
-        strategy = self._infos.get(
-            CONF_BATTERY_POWER_STRATEGY, BATTERY_POWER_STRATEGY_EXISTING
-        )
-        if strategy == BATTERY_POWER_STRATEGY_EXISTING:
+        start_soc = self._infos.get(CONF_BATTERY_CHARGE_RESERVE_START_SOC, DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC)
+        if not (self._infos.get(CONF_BATTERY_SOC_ENTITY_ID) or self._infos.get(CONF_BATTERY_CHARGE_POWER_ENTITY_ID)):
             return await self.async_step_finalize()
 
         if user_input is not None:
@@ -247,21 +198,7 @@ class SolarOptimizerBaseConfigFlow(FlowHandler):
                 DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
             )
         )
-        close_soc = float(
-            self._infos.get(
-                CONF_BATTERY_BUDGET_STOP_SOC,
-                DEFAULT_BATTERY_BUDGET_STOP_SOC,
-            )
-        )
-        open_soc = float(
-            self._infos.get(
-                CONF_BATTERY_BUDGET_START_SOC,
-                DEFAULT_BATTERY_BUDGET_START_SOC,
-            )
-        )
-        points = battery_charge_reserve_breakpoints(
-            float(start_soc), close_soc, open_soc
-        )
+        points = battery_charge_reserve_breakpoints(float(start_soc))
         rows = [
             "| Battery SOC | Minimum charge reserve |",
             "| ---: | ---: |",
@@ -271,14 +208,12 @@ class SolarOptimizerBaseConfigFlow(FlowHandler):
             reserve = battery_charge_reserve_power(
                 maximum_power,
                 float(start_soc),
-                close_soc,
-                open_soc,
                 point,
             )
             rows.append(
                 f"| {point:g}–{next_point - 1:g}% | {reserve:.0f} W |"
             )
-        rows.append(f"| {open_soc:g}% | 0 W (battery budget opens) |")
+        rows.append("| 100% | 0 W |")
 
         return self.async_show_form(
             step_id="battery_reserve_review",

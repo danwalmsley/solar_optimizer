@@ -81,16 +81,16 @@ async def async_setup_entry(
             coordinator, hass, "maximum_battery_charge_reserve_power"
         )
         entity12 = SolarOptimizerSensorEntity(
-            coordinator, hass, "decision_reversal_hold_sec"
+            coordinator, hass, "switching_stability_sec"
         )
         entity13 = SolarOptimizerSensorEntity(
-            coordinator, hass, "battery_power_strategy"
+            coordinator, hass, "available_controlled_load_budget"
         )
         entity14 = SolarOptimizerSensorEntity(
             coordinator, hass, "effective_battery_charge_reserve_power"
         )
         entity15 = SolarOptimizerSensorEntity(
-            coordinator, hass, "power_deficit_confirmation_sec"
+            coordinator, hass, "projected_shortfall"
         )
 
         async_add_entities(
@@ -157,14 +157,8 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        if (
-            not self.coordinator
-            or not self.coordinator.data
-            or (value := self.coordinator.data.get(self.idx)) is None
-        ):
-            _LOGGER.debug("No coordinator found or no data...")
-            return
-
+        value = self.coordinator.data.get(self.idx) if self.coordinator.data else None
+        self._attr_available = value is not None
         self._attr_native_value = value
         self.async_write_ha_state()
 
@@ -178,6 +172,13 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             manufacturer=DEVICE_MANUFACTURER,
             model=INTEGRATION_MODEL,
         )
+
+    @property
+    def extra_state_attributes(self):
+        """Explain allocations without introducing one new entity per decision."""
+        if self.idx == "available_controlled_load_budget" and self.coordinator.data:
+            return {"device_decisions": self.coordinator.data.get("device_decisions", {})}
+        return {}
 
     @property
     def icon(self) -> str | None:
@@ -202,13 +203,8 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             "effective_battery_charge_reserve_power",
         ):
             return "mdi:battery-arrow-up"
-        elif self.idx in (
-            "decision_reversal_hold_sec",
-            "power_deficit_confirmation_sec",
-        ):
+        elif self.idx == "switching_stability_sec":
             return "mdi:timer-lock"
-        elif self.idx == "battery_power_strategy":
-            return "mdi:battery-sync"
         else:
             return "mdi:solar-power-variant"
 
@@ -218,22 +214,14 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             return SensorDeviceClass.MONETARY
         elif self.idx == "battery_soc":
             return SensorDeviceClass.BATTERY
-        elif self.idx in (
-            "battery_power_strategy",
-            "decision_reversal_hold_sec",
-            "power_deficit_confirmation_sec",
-        ):
+        elif self.idx == "switching_stability_sec":
             return None
         else:
             return SensorDeviceClass.POWER
 
     @property
     def state_class(self) -> SensorStateClass | None:
-        if self.idx in (
-            "battery_power_strategy",
-            "decision_reversal_hold_sec",
-            "power_deficit_confirmation_sec",
-        ):
+        if self.idx == "switching_stability_sec":
             return None
         elif self.device_class in (SensorDeviceClass.POWER, SensorDeviceClass.BATTERY):
             return SensorStateClass.MEASUREMENT
@@ -246,12 +234,7 @@ class SolarOptimizerSensorEntity(CoordinatorEntity, SensorEntity):
             return "€"
         elif self.idx == "battery_soc":
             return "%"
-        elif self.idx == "battery_power_strategy":
-            return None
-        elif self.idx in (
-            "decision_reversal_hold_sec",
-            "power_deficit_confirmation_sec",
-        ):
+        elif self.idx == "switching_stability_sec":
             return UnitOfTime.SECONDS
         else:
             return UnitOfPower.WATT
