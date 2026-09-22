@@ -468,3 +468,4 @@ async def test_configure_reads_stored_options_and_unregisters_events(hass):
     coordinator._cleanup_events()
     cancel.assert_called_once()
     coordinator._cleanup_stability()
+    await coordinator.async_shutdown()
