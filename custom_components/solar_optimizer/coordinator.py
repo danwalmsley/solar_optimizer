@@ -18,37 +18,26 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
 )
 
-from homeassistant.util.unit_conversion import (
-    BaseUnitConverter,
-    PowerConverter
-)
+from homeassistant.util.unit_conversion import BaseUnitConverter, PowerConverter
 
 from homeassistant.config_entries import ConfigEntry
 
 from .const import (
-    BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
-    BATTERY_POWER_STRATEGY_EXISTING,
-    CONF_BATTERY_BUDGET_START_SOC,
-    CONF_BATTERY_BUDGET_STOP_SOC,
     CONF_BATTERY_CHARGE_RESERVE_START_SOC,
-    CONF_BATTERY_POWER_STRATEGY,
-    CONF_DECISION_REVERSAL_HOLD_SEC,
     CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
     CONF_MINIMUM_EXPORT_POWER,
-    CONF_POWER_DEFICIT_CONFIRMATION_SEC,
-    DEFAULT_BATTERY_BUDGET_START_SOC,
-    DEFAULT_BATTERY_BUDGET_STOP_SOC,
-    DEFAULT_DECISION_REVERSAL_HOLD_SEC,
     DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC,
     DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
     DEFAULT_MINIMUM_EXPORT_POWER,
-    DEFAULT_POWER_DEFICIT_CONFIRMATION_SEC,
+    CONF_SWITCHING_STABILITY_SEC,
+    DEFAULT_SWITCHING_STABILITY_SEC,
     DEFAULT_RAZ_TIME,
     DEFAULT_REFRESH_PERIOD_SEC,
     SOLAR_OPTIMIZER_DOMAIN,
     battery_charge_reserve_power,
     name_to_unique_id,
 )
+from .surplus_control import SurplusController
 from .managed_device import ManagedDevice
 from .simulated_annealing_algo import SimulatedAnnealingAlgorithm
 
@@ -61,13 +50,16 @@ def get_safe_float(hass, entity_id: str, unit: str = None):
     if entity_id is None or not (state := hass.states.get(entity_id)) or state.state == "unknown" or state.state == "unavailable":
         return None
 
-    float_val = float(state.state)
+    try:
+        float_val = float(state.state)
+    except (TypeError, ValueError):
+        return None
 
-    if (unit is not None) and ('device_class' in state.attributes) and (state.attributes["device_class"] == "power"):
-        float_val = PowerConverter.convert(float_val,
-            state.attributes["unit_of_measurement"],
-            unit
-        )
+    if unit is not None and state.attributes.get("unit_of_measurement"):
+        try:
+            float_val = PowerConverter.convert(float_val, state.attributes["unit_of_measurement"], unit)
+        except (TypeError, ValueError, KeyError):
+            return None
 
     return None if math.isinf(float_val) or not math.isfinite(float_val) else float_val
 
@@ -92,24 +84,11 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         self._last_production: float = 0.0
         self._battery_soc_entity_id: str = None
         self._battery_charge_power_entity_id: str = None
-        self._battery_power_strategy: str = BATTERY_POWER_STRATEGY_EXISTING
-        self._battery_budget_start_soc: float = DEFAULT_BATTERY_BUDGET_START_SOC
-        self._battery_budget_stop_soc: float = DEFAULT_BATTERY_BUDGET_STOP_SOC
-        self._maximum_battery_charge_reserve_power: float = (
-            DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER
-        )
-        self._battery_charge_reserve_start_soc: float = (
-            DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC
-        )
+        self._maximum_battery_charge_reserve_power: float = DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER
+        self._battery_charge_reserve_start_soc: float = DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC
         self._minimum_export_power: float = DEFAULT_MINIMUM_EXPORT_POWER
-        self._decision_reversal_hold_sec: float = DEFAULT_DECISION_REVERSAL_HOLD_SEC
-        self._power_deficit_confirmation_sec: float = (
-            DEFAULT_POWER_DEFICIT_CONFIRMATION_SEC
-        )
-        self._last_state_change_command: dict[str, tuple[float, bool, float]] = {}
-        self._pending_power_deficit_off_since: dict[str, float] = {}
-        self._power_deficit_confirmation_unsub = None
-        self._battery_budget_active: bool = False
+        self._surplus = SurplusController()
+        self._stability_unsub = None
         self._raz_time: time = None
 
         self._central_config_done = False
@@ -128,24 +107,19 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
             cooling_factor = float(algo_config.get("cooling_factor", 0.95))
             max_iteration_number = int(algo_config.get("max_iteration_number", 1000))
 
-        self._algo = SimulatedAnnealingAlgorithm(
-            init_temp, min_temp, cooling_factor, max_iteration_number
-        )
+        self._algo = SimulatedAnnealingAlgorithm(init_temp, min_temp, cooling_factor, max_iteration_number)
         self.config = config
 
     async def configure(self, config: ConfigEntry) -> None:
         """Configure the coordinator from configEntry of the integration"""
-        refresh_period_sec = (
-            config.data.get("refresh_period_sec") or DEFAULT_REFRESH_PERIOD_SEC
-        )
+        values = {**config.data, **config.options}
+        refresh_period_sec = values.get("refresh_period_sec") or DEFAULT_REFRESH_PERIOD_SEC
         self.update_interval = timedelta(seconds=refresh_period_sec)
         self._schedule_refresh()
 
-        self._power_consumption_entity_id = config.data.get(
-            "power_consumption_entity_id"
-        )
-        self._power_production_entity_id = config.data.get("power_production_entity_id")
-        self._subscribe_to_events = config.data.get("subscribe_to_events")
+        self._power_consumption_entity_id = values.get("power_consumption_entity_id")
+        self._power_production_entity_id = values.get("power_production_entity_id")
+        self._subscribe_to_events = values.get("subscribe_to_events")
 
         if self._unsub_events is not None:
             self._unsub_events()
@@ -155,78 +129,42 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
             tracked_entities = [
                 self._power_consumption_entity_id,
                 self._power_production_entity_id,
-                config.data.get("battery_soc_entity_id"),
-                config.data.get("battery_charge_power_entity_id"),
+                values.get("battery_soc_entity_id"),
+                values.get("battery_charge_power_entity_id"),
             ]
-            self._unsub_events = async_track_state_change_event(
-                self.hass,
-                [entity_id for entity_id in tracked_entities if entity_id],
-                self._async_on_change)
+            self._unsub_events = async_track_state_change_event(self.hass, [entity_id for entity_id in tracked_entities if entity_id], self._async_on_change)
+            config.async_on_unload(self._cleanup_events)
 
-        self._sell_cost_entity_id = config.data.get("sell_cost_entity_id")
-        self._buy_cost_entity_id = config.data.get("buy_cost_entity_id")
-        self._sell_tax_percent_entity_id = config.data.get("sell_tax_percent_entity_id")
-        self._battery_soc_entity_id = config.data.get("battery_soc_entity_id")
-        self._battery_charge_power_entity_id = config.data.get(
-            "battery_charge_power_entity_id"
-        )
-        self._battery_power_strategy = config.data.get(
-            CONF_BATTERY_POWER_STRATEGY, BATTERY_POWER_STRATEGY_EXISTING
-        )
-        self._battery_budget_start_soc = float(
-            config.data.get(
-                CONF_BATTERY_BUDGET_START_SOC,
-                DEFAULT_BATTERY_BUDGET_START_SOC,
-            )
-        )
-        self._battery_budget_stop_soc = float(
-            config.data.get(
-                CONF_BATTERY_BUDGET_STOP_SOC,
-                DEFAULT_BATTERY_BUDGET_STOP_SOC,
-            )
-        )
+        self._sell_cost_entity_id = values.get("sell_cost_entity_id")
+        self._buy_cost_entity_id = values.get("buy_cost_entity_id")
+        self._sell_tax_percent_entity_id = values.get("sell_tax_percent_entity_id")
+        self._battery_soc_entity_id = values.get("battery_soc_entity_id")
+        self._battery_charge_power_entity_id = values.get("battery_charge_power_entity_id")
         self._maximum_battery_charge_reserve_power = float(
-            config.data.get(
+            values.get(
                 CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
                 DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
             )
         )
         self._battery_charge_reserve_start_soc = float(
-            config.data.get(
+            values.get(
                 CONF_BATTERY_CHARGE_RESERVE_START_SOC,
                 DEFAULT_BATTERY_CHARGE_RESERVE_START_SOC,
             )
         )
         self._minimum_export_power = float(
-            config.data.get(
+            values.get(
                 CONF_MINIMUM_EXPORT_POWER,
                 DEFAULT_MINIMUM_EXPORT_POWER,
             )
         )
-        self._decision_reversal_hold_sec = float(
-            config.data.get(
-                CONF_DECISION_REVERSAL_HOLD_SEC,
-                DEFAULT_DECISION_REVERSAL_HOLD_SEC,
-            )
-        )
-        self._power_deficit_confirmation_sec = float(
-            config.data.get(
-                CONF_POWER_DEFICIT_CONFIRMATION_SEC,
-                DEFAULT_POWER_DEFICIT_CONFIRMATION_SEC,
-            )
-        )
-        self._last_state_change_command.clear()
-        self._cleanup_power_deficit_confirmation()
-        config.async_on_unload(self._cleanup_power_deficit_confirmation)
-        # If Home Assistant restarts while the SOC is between the thresholds, start
-        # conservatively. The budget opens again only after the upper threshold is met.
-        self._battery_budget_active = False
-        self._smooth_production = config.data.get("smooth_production") is True
+        self._cleanup_stability()
+        self._surplus = SurplusController(float(values.get(CONF_SWITCHING_STABILITY_SEC, DEFAULT_SWITCHING_STABILITY_SEC)))
+        config.async_on_unload(self._cleanup_stability)
+        self._smooth_production = values.get("smooth_production") is True
         self._last_production = 0.0
 
-        self._raz_time = datetime.strptime(
-            config.data.get("raz_time") or DEFAULT_RAZ_TIME, "%H:%M"
-        ).time()
+        self._raz_time = datetime.strptime(values.get("raz_time") or DEFAULT_RAZ_TIME, "%H:%M").time()
         self._central_config_done = True
 
     async def on_ha_started(self, _) -> None:
@@ -238,495 +176,187 @@ class SolarOptimizerCoordinator(DataUpdateCoordinator):
         self._schedule_refresh()
 
     async def _async_update_data(self):
-        _LOGGER.info("Refreshing Solar Optimizer calculation")
-
-        calculated_data = {}
-
-        # Check forced activation timers — stop and re-enable any device whose timer has expired
+        """Select loads, then enforce surplus and switching constraints."""
+        data = {}
         for device in self._devices:
-            expired = await device.expire_forced_activation()
-            if expired:
-                _LOGGER.info("Forced activation expired for %s — SO management re-enabled", device.name)
-
-        # Add a device state attributes
-        for _, device in enumerate(self._devices):
-            # Initialize current power depending or reality
+            await device.expire_forced_activation()
             device.set_current_power_with_device_state()
 
-        # Add a power_consumption and power_production
-        power_production = get_safe_float(self.hass, self._power_production_entity_id, "W")
-        if power_production is None:
-            _LOGGER.warning(
-                "Power production is not valued. Solar Optimizer will be disabled"
-            )
-            return None
-
-        if not self._smooth_production:
-            calculated_data["power_production"] = power_production
-        else:
-            self._last_production = round(
-                0.5 * self._last_production + 0.5 * power_production
-            )
-            calculated_data["power_production"] = self._last_production
-
-        calculated_data["power_production_brut"] = power_production
-
-        calculated_data["power_consumption"] = get_safe_float(
-            self.hass, self._power_consumption_entity_id, "W"
-        )
-
-        calculated_data["sell_cost"] = get_safe_float(
-            self.hass, self._sell_cost_entity_id
-        )
-
-        calculated_data["buy_cost"] = get_safe_float(
-            self.hass, self._buy_cost_entity_id
-        )
-
-        calculated_data["sell_tax_percent"] = get_safe_float(
-            self.hass, self._sell_tax_percent_entity_id
-        )
-
+        production = get_safe_float(self.hass, self._power_production_entity_id, "W")
+        grid = get_safe_float(self.hass, self._power_consumption_entity_id, "W")
         soc = get_safe_float(self.hass, self._battery_soc_entity_id)
-        calculated_data["battery_soc"] = soc if soc is not None else 0
-
-        charge_power = get_safe_float(self.hass, self._battery_charge_power_entity_id)
-        calculated_data["battery_charge_power"] = (
-            charge_power if charge_power is not None else 0
-        )
-
-        self._update_battery_budget(soc)
-        calculated_data["battery_budget_active"] = self._battery_budget_active
-        calculated_data["battery_power_strategy"] = self._battery_power_strategy
-        calculated_data["maximum_battery_charge_reserve_power"] = (
-            self._maximum_battery_charge_reserve_power
-        )
-        calculated_data["battery_charge_reserve_start_soc"] = (
-            self._battery_charge_reserve_start_soc
-        )
-        calculated_data["effective_battery_charge_reserve_power"] = (
-            self._effective_battery_charge_reserve_power(soc)
-        )
-        calculated_data["minimum_export_power"] = self._minimum_export_power
-        calculated_data["decision_reversal_hold_sec"] = (
-            self._decision_reversal_hold_sec
-        )
-        calculated_data["power_deficit_confirmation_sec"] = (
-            self._power_deficit_confirmation_sec
-        )
-        calculated_data["minimum_charge_constraint_active"] = (
-            self._minimum_charge_constraint_active
-        )
-        calculated_data["effective_power_consumption"] = (
-            self._effective_power_consumption(
-                calculated_data["power_consumption"],
-                calculated_data["battery_charge_power"],
-                soc,
-            )
-        )
-        calculated_data["usable_excess_power"] = (
-            max(0, -calculated_data["effective_power_consumption"])
-            if calculated_data["effective_power_consumption"] is not None
-            else None
-        )
-
-        calculated_data["priority_weight"] = self.priority_weight
-
-        #
-        # Call Algorithm Recuit simulé
-        #
-        best_solution, best_objective, total_power = self._algo.recuit_simule(
-            self._devices,
-            calculated_data["effective_power_consumption"],
-            calculated_data["power_production"],
-            calculated_data["sell_cost"],
-            calculated_data["buy_cost"],
-            calculated_data["sell_tax_percent"],
-            calculated_data["battery_soc"],
-            calculated_data["priority_weight"],
-        )
-
-        best_solution, total_power = self._enforce_minimum_charge_constraint(
-            best_solution,
-            calculated_data["effective_power_consumption"],
-        )
-        best_solution, total_power = self._apply_power_deficit_confirmation(
-            best_solution
-        )
-        best_solution, total_power = self._apply_decision_reversal_hold(best_solution)
-
-        calculated_data["best_solution"] = best_solution
-        calculated_data["best_objective"] = best_objective
-        calculated_data["total_power"] = total_power
-
-        # Uses the result to turn on or off or change power
-        should_log = False
-        for _, equipement in enumerate(best_solution):
-            name = equipement["name"]
-            requested_power = equipement.get("requested_power")
-            state = equipement["state"]
-            _LOGGER.debug("Dealing with best_solution for %s - %s", name, equipement)
-            device = self.get_device_by_name(name)
-            if not device:
-                continue
-
-            old_requested_power = device.requested_power
-            is_active = device.is_active
-            state_command_pending = False
-            should_force_offpeak = device.should_be_forced_offpeak
-            if calculated_data["minimum_charge_constraint_active"] and not state:
-                should_force_offpeak = False
-            if should_force_offpeak and self._is_recent_state_change_command(
-                name, False
-            ):
-                should_force_offpeak = False
-            if should_force_offpeak:
-                _LOGGER.debug("%s - we should force %s name", self, name)
-            if is_active and not state and not should_force_offpeak:
-                if not self._is_recent_state_change_command(name, False):
-                    _LOGGER.debug("Extinction de %s", name)
-                    should_log = True
-                    old_requested_power = 0
-                    await device.deactivate()
-                    self._record_state_change_command(name, False, 0)
-            elif not is_active and (state or should_force_offpeak):
-                state_command_pending = self._is_recent_state_change_command(
-                    name, True
-                )
-                if not state_command_pending:
-                    _LOGGER.debug("Allumage de %s", name)
-                    should_log = True
-                    old_requested_power = requested_power
-                    await device.activate(requested_power)
-                    self._record_state_change_command(
-                        name, True, requested_power or device.power_max
-                    )
-
-            # Send change power if state is now on and change power is accepted and (power have change or eqt is just activated)
-            if (
-                state
-                and not state_command_pending
-                and device.can_change_power
-                and (device.current_power != requested_power or not is_active)
-            ):
-                _LOGGER.debug(
-                    "Change power of %s to %s",
-                    equipement["name"],
-                    requested_power,
-                )
-                should_log = True
-                await device.change_requested_power(requested_power)
-
-            device.set_requested_power(old_requested_power)
-
-            # Add updated data to the result
-            calculated_data[name_to_unique_id(name)] = device
-
-        if should_log:
-            _LOGGER.info("Calculated data are: %s", calculated_data)
+        battery = get_safe_float(self.hass, self._battery_charge_power_entity_id, "W")
+        has_battery = bool(self._battery_charge_power_entity_id or self._battery_soc_entity_id)
+        valid = production is not None and grid is not None
+        if has_battery:
+            valid = valid and battery is not None and soc is not None and 0 <= soc <= 100
         else:
-            _LOGGER.debug("Calculated data are: %s", calculated_data)
+            battery = 0
+        reserve = self._effective_battery_charge_reserve_power(soc)
+        effective = self._effective_power_consumption(grid, battery, soc) if valid else None
+        if production is not None:
+            self._last_production = round(0.5 * self._last_production + 0.5 * production)
+        data.update(
+            power_production=(self._last_production if self._smooth_production else production),
+            power_production_brut=production,
+            power_consumption=grid,
+            battery_soc=soc,
+            battery_charge_power=battery,
+            maximum_battery_charge_reserve_power=self._maximum_battery_charge_reserve_power,
+            battery_charge_reserve_start_soc=self._battery_charge_reserve_start_soc,
+            effective_battery_charge_reserve_power=reserve,
+            minimum_export_power=self._minimum_export_power,
+            switching_stability_sec=self._surplus.interval,
+            effective_power_consumption=effective,
+            usable_excess_power=max(0, -effective) if effective is not None else None,
+            priority_weight=self.priority_weight,
+        )
+        for key, entity in (("sell_cost", self._sell_cost_entity_id), ("buy_cost", self._buy_cost_entity_id), ("sell_tax_percent", self._sell_tax_percent_entity_id)):
+            data[key] = get_safe_float(self.hass, entity)
 
-        return calculated_data
+        equipment = []
+        for device in self._devices:
+            if not device.is_enabled:
+                continue  # Manual/forced loads remain ordinary household demand.
+            device.set_battery_soc(soc)
+            equipment.append(
+                {
+                    "name": device.name,
+                    "current_power": device.current_power,
+                    "state": device.is_active,
+                    "requested_power": device.current_power,
+                    "priority": device.priority,
+                    "power_max": device.power_max,
+                    "power_min": device.power_min,
+                    "power_step": device.power_step,
+                    "can_change_power": device.can_change_power,
+                    "stop_reason": device.surplus_stop_reason,
+                    "increase_waiting": device.is_waiting if not device.is_active else device.power_change_waiting,
+                }
+            )
 
-    def _update_battery_budget(self, battery_soc: float | None) -> None:
-        """Update the battery budget latch using separate start and stop thresholds."""
-        if (
-            self._battery_power_strategy
-            != BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET
-            or battery_soc is None
-        ):
-            self._battery_budget_active = False
-            return
+        proposed, objective = [], None
+        if valid and all(data[k] is not None for k in ("sell_cost", "buy_cost", "sell_tax_percent")):
+            try:
+                proposed, objective, _ = self._algo.recuit_simule(
+                    self._devices,
+                    effective,
+                    data["power_production"],
+                    data["sell_cost"],
+                    data["buy_cost"],
+                    data["sell_tax_percent"],
+                    soc,
+                    self.priority_weight,
+                )
+            except Exception:  # Protection must survive a failed allocation calculation.
+                _LOGGER.exception("Optimizer failed; retaining only safe existing loads")
+        now = monotonic_time.monotonic()
+        solution = self._surplus.decide(equipment, proposed, effective, now)
+        for item in solution:
+            device = self.get_device_by_name(item["name"])
+            target = item["requested_power"]
+            previous = self._surplus.commands.get(device.name)
+            cancelling_start = previous is not None and previous[1] > 0 and target == 0
+            if not cancelling_start and target == item["current_power"] and device.is_active == (target > 0):
+                continue
+            if self._surplus.command_pending(device.name, target, now):
+                continue
+            try:
+                if target <= 0:
+                    await device.deactivate()
+                elif not device.is_active:
+                    await device.activate(target)
+                    if device.can_change_power:
+                        await device.change_requested_power(target)
+                elif device.can_change_power:
+                    await device.change_requested_power(target)
+                device.set_requested_power(target)
+            except Exception:
+                # A broken device must not prevent shedding other managed loads.
+                # Record the attempted command to bound retries and reserve its power.
+                item["decision_reason"] = "command_failed"
+                _LOGGER.exception("Failed to set %s to %s W; will recheck", device.name, target)
+            self._surplus.record_command(device.name, target, now)
 
-        if battery_soc >= self._battery_budget_start_soc:
-            self._battery_budget_active = True
-        elif battery_soc <= self._battery_budget_stop_soc:
-            self._battery_budget_active = False
+        # Schedule command settling as well as confirmation expiry.
+        deadlines = [self._surplus.deadline] if self._surplus.deadline is not None else []
+        deadlines.extend(sent + self._surplus.interval for sent, _ in self._surplus.commands.values() if sent + self._surplus.interval > now)
+        self._schedule_stability(min(deadlines) if deadlines else None, now)
+        data.update(
+            best_solution=solution,
+            best_objective=objective,
+            total_power=sum(e["requested_power"] for e in solution),
+            available_controlled_load_budget=self._surplus.budget,
+            projected_shortfall=self._surplus.shortfall,
+            device_decisions={
+                e["name"]: {
+                    "reason": e["decision_reason"],
+                    "pending_until": (
+                        (datetime.now().astimezone() + timedelta(seconds=max(0, e["pending_deadline"] - now))).isoformat()
+                        if e["pending_deadline"] is not None and e["pending_deadline"] > now
+                        else None
+                    ),
+                }
+                for e in solution
+            },
+        )
+        for device in self._devices:
+            data[name_to_unique_id(device.name)] = device
+        return data
 
-    def _effective_battery_charge_reserve_power(
-        self, battery_soc: float | None
-    ) -> float:
-        """Return the SOC-tapered charging reserve for this cycle."""
+    def _effective_battery_charge_reserve_power(self, soc):
+        if not (self._battery_charge_power_entity_id or self._battery_soc_entity_id):
+            return 0
         return battery_charge_reserve_power(
             self._maximum_battery_charge_reserve_power,
             self._battery_charge_reserve_start_soc,
-            self._battery_budget_stop_soc,
-            self._battery_budget_start_soc,
-            battery_soc,
+            soc,
         )
 
-    def _effective_power_consumption(
-        self,
-        grid_power: float | None,
-        battery_power: float,
-        battery_soc: float | None = None,
-    ) -> float | None:
-        """Return net power presented to the optimizer for the selected policy.
-
-        Grid power is negative while exporting. Battery power is negative while
-        charging and positive while discharging.
-        """
-        if grid_power is None:
+    def _effective_power_consumption(self, grid, battery, soc=None):
+        if grid is None or battery is None:
             return None
+        return grid + battery + self._effective_battery_charge_reserve_power(soc) + self._minimum_export_power
 
-        if self._battery_power_strategy == BATTERY_POWER_STRATEGY_EXISTING:
-            return grid_power + battery_power
+    def _cleanup_stability(self):
+        if self._stability_unsub is not None:
+            self._stability_unsub()
+            self._stability_unsub = None
+        self._surplus.pending.clear()
+        self._surplus.commands.clear()
 
-        if (
-            self._battery_power_strategy
-            == BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET
-            and self._battery_budget_active
-        ):
-            # Once opened at the upper SOC threshold, let an already-running load
-            # ride through solar dips using the battery until the lower threshold.
-            return grid_power
+    def _cleanup_events(self):
+        if self._unsub_events is not None:
+            self._unsub_events()
+            self._unsub_events = None
 
-        # Flexible loads may reduce charging, but the configured charging floor and
-        # export margin are reserved. A positive value means the floor is violated.
-        return (
-            grid_power
-            + battery_power
-            + self._effective_battery_charge_reserve_power(battery_soc)
-            + self._minimum_export_power
-        )
+    def _schedule_stability(self, deadline, now):
+        if self._stability_unsub is not None:
+            self._stability_unsub()
+            self._stability_unsub = None
+        if deadline is not None:
+            self._stability_unsub = async_call_later(self.hass, max(0.05, deadline - now), self._async_stability_elapsed)
 
-    @property
-    def _minimum_charge_constraint_active(self) -> bool:
-        """Return whether the hard charging floor applies in the current cycle."""
-        return self._battery_power_strategy != BATTERY_POWER_STRATEGY_EXISTING and not (
-            self._battery_power_strategy
-            == BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET
-            and self._battery_budget_active
-        )
-
-    def _enforce_minimum_charge_constraint(
-        self,
-        solution: list[dict],
-        effective_power_consumption: float | None,
-    ) -> tuple[list[dict], float]:
-        """Shed flexible power until the battery charging floor is respected.
-
-        This final deterministic pass makes the floor independent of energy prices,
-        priorities, and normal minimum-on timers. Lower-priority devices are shed
-        first; variable-power devices are reduced in configured steps before stopping.
-        """
-        total_power = self._algo.consommation_equipements(solution)
-        if (
-            not self._minimum_charge_constraint_active
-            or effective_power_consumption is None
-            or not solution
-        ):
-            return solution, total_power
-
-        current_power = sum(
-            equipment["current_power"]
-            for equipment in solution
-            if equipment["state"] or equipment["current_power"] > 0
-        )
-        projected_deficit = effective_power_consumption + total_power - current_power
-        if projected_deficit <= 0:
-            return solution, total_power
-
-        for equipment in sorted(
-            (equipment for equipment in solution if equipment["state"]),
-            key=lambda equipment: equipment["priority"],
-            reverse=True,
-        ):
-            requested_power = equipment["requested_power"]
-            if equipment["can_change_power"]:
-                while requested_power > 0 and projected_deficit > 0:
-                    new_power = max(0, requested_power - equipment["power_step"])
-                    if 0 < new_power < equipment["power_min"]:
-                        new_power = 0
-                    projected_deficit -= requested_power - new_power
-                    requested_power = new_power
-                equipment["requested_power"] = requested_power
-                equipment["state"] = requested_power > 0
-            else:
-                equipment["state"] = False
-                equipment["requested_power"] = 0
-                projected_deficit -= requested_power
-
-            if projected_deficit <= 0:
-                break
-
-        return solution, self._algo.consommation_equipements(solution)
-
-    def _cancel_power_deficit_confirmation_refresh(self) -> None:
-        """Cancel a scheduled power-deficit confirmation refresh."""
-        if self._power_deficit_confirmation_unsub is not None:
-            self._power_deficit_confirmation_unsub()
-            self._power_deficit_confirmation_unsub = None
-
-    def _cleanup_power_deficit_confirmation(self) -> None:
-        """Clear pending confirmations and cancel their scheduled refresh."""
-        self._pending_power_deficit_off_since.clear()
-        self._cancel_power_deficit_confirmation_refresh()
-
-    async def _async_power_deficit_confirmation_elapsed(self, _) -> None:
-        """Recalculate when the earliest pending deficit confirmation expires."""
-        self._power_deficit_confirmation_unsub = None
+    async def _async_stability_elapsed(self, _):
+        self._stability_unsub = None
         await self.async_refresh()
         self._schedule_refresh()
-
-    def _schedule_power_deficit_confirmation_refresh(
-        self, current_time: float
-    ) -> None:
-        """Schedule a refresh at the earliest pending off-decision deadline."""
-        if not self._pending_power_deficit_off_since:
-            self._cancel_power_deficit_confirmation_refresh()
-            return
-        if self._power_deficit_confirmation_unsub is not None:
-            return
-
-        earliest_started = min(self._pending_power_deficit_off_since.values())
-        delay = max(
-            0.05,
-            self._power_deficit_confirmation_sec
-            - (current_time - earliest_started),
-        )
-        self._power_deficit_confirmation_unsub = async_call_later(
-            self.hass,
-            delay,
-            self._async_power_deficit_confirmation_elapsed,
-        )
-
-    def _apply_power_deficit_confirmation(
-        self,
-        solution: list[dict],
-        now: float | None = None,
-    ) -> tuple[list[dict], float]:
-        """Require a persistent deficit before stopping a usable running device.
-
-        Recovery cancels the pending stop immediately. Devices which are no longer
-        usable still stop immediately because those decisions may represent SOC,
-        maximum-runtime, or user-template safety constraints.
-        """
-        if self._power_deficit_confirmation_sec <= 0:
-            self._pending_power_deficit_off_since.clear()
-            self._cancel_power_deficit_confirmation_refresh()
-            return solution, self._algo.consommation_equipements(solution)
-
-        current_time = monotonic_time.monotonic() if now is None else now
-        solution_names = {equipment["name"] for equipment in solution}
-        for name in list(self._pending_power_deficit_off_since):
-            if name not in solution_names:
-                self._pending_power_deficit_off_since.pop(name, None)
-
-        for equipment in solution:
-            name = equipment["name"]
-            currently_running = equipment.get("current_power", 0) > 0
-            still_usable = equipment.get("is_usable", True)
-
-            if equipment["state"] or not currently_running or not still_usable:
-                self._pending_power_deficit_off_since.pop(name, None)
-                continue
-
-            started = self._pending_power_deficit_off_since.setdefault(
-                name, current_time
-            )
-            if current_time - started < self._power_deficit_confirmation_sec:
-                equipment["state"] = True
-                equipment["requested_power"] = equipment["current_power"]
-                equipment["power_deficit_confirmation_pending"] = True
-            else:
-                self._pending_power_deficit_off_since.pop(name, None)
-
-        # Tests pass an explicit monotonic time and do not need a real HA timer.
-        if now is None:
-            self._schedule_power_deficit_confirmation_refresh(current_time)
-
-        return solution, self._algo.consommation_equipements(solution)
-
-    def _record_state_change_command(
-        self, device_name: str, state: bool, requested_power: float
-    ) -> None:
-        """Record an optimizer on/off command for reversal throttling."""
-        self._last_state_change_command[device_name] = (
-            monotonic_time.monotonic(),
-            state,
-            requested_power,
-        )
-
-    def _is_recent_state_change_command(
-        self,
-        device_name: str,
-        state: bool,
-        now: float | None = None,
-    ) -> bool:
-        """Return whether this same command is already settling."""
-        previous = self._last_state_change_command.get(device_name)
-        if previous is None or self._decision_reversal_hold_sec <= 0:
-            return False
-
-        changed_at, commanded_state, _ = previous
-        current_time = monotonic_time.monotonic() if now is None else now
-        return (
-            commanded_state == state
-            and current_time - changed_at < self._decision_reversal_hold_sec
-        )
-
-    def _apply_decision_reversal_hold(
-        self,
-        solution: list[dict],
-        now: float | None = None,
-    ) -> tuple[list[dict], float]:
-        """Suppress only the opposite state decision during the settling window.
-
-        With no prior command, the first decision is immediate. Repeating the same
-        decision is allowed; only a command that would reverse the last optimizer
-        state change is held until the configured number of seconds has elapsed.
-        """
-        if self._decision_reversal_hold_sec <= 0:
-            return solution, self._algo.consommation_equipements(solution)
-
-        current_time = monotonic_time.monotonic() if now is None else now
-        for equipment in solution:
-            previous = self._last_state_change_command.get(equipment["name"])
-            if previous is None:
-                continue
-
-            changed_at, commanded_state, commanded_power = previous
-            if (
-                equipment["state"] != commanded_state
-                and current_time - changed_at < self._decision_reversal_hold_sec
-            ):
-                equipment["state"] = commanded_state
-                equipment["requested_power"] = (
-                    commanded_power if commanded_state else 0
-                )
-                equipment["decision_reversal_held"] = True
-
-        return solution, self._algo.consommation_equipements(solution)
 
     @classmethod
     def get_coordinator(cls) -> Any:
         """Get the coordinator from the hass.data"""
-        if (
-            not hasattr(SolarOptimizerCoordinator, "hass")
-            or SolarOptimizerCoordinator.hass is None
-            or SolarOptimizerCoordinator.hass.data.get(SOLAR_OPTIMIZER_DOMAIN) is None
-        ):
+        if not hasattr(SolarOptimizerCoordinator, "hass") or SolarOptimizerCoordinator.hass is None or SolarOptimizerCoordinator.hass.data.get(SOLAR_OPTIMIZER_DOMAIN) is None:
             return None
 
-        return SolarOptimizerCoordinator.hass.data[SOLAR_OPTIMIZER_DOMAIN][
-            "coordinator"
-        ]
+        return SolarOptimizerCoordinator.hass.data[SOLAR_OPTIMIZER_DOMAIN]["coordinator"]
 
     @classmethod
     def reset(cls) -> Any:
         """Reset the coordinator from the hass.data"""
-        if (
-            not hasattr(SolarOptimizerCoordinator, "hass")
-            or SolarOptimizerCoordinator.hass is None
-            or SolarOptimizerCoordinator.hass.data.get(SOLAR_OPTIMIZER_DOMAIN) is None
-        ):
+        if not hasattr(SolarOptimizerCoordinator, "hass") or SolarOptimizerCoordinator.hass is None or SolarOptimizerCoordinator.hass.data.get(SOLAR_OPTIMIZER_DOMAIN) is None:
             return
 
-        SolarOptimizerCoordinator.hass.data[SOLAR_OPTIMIZER_DOMAIN][
-            "coordinator"
-        ] = None
+        SolarOptimizerCoordinator.hass.data[SOLAR_OPTIMIZER_DOMAIN]["coordinator"] = None
 
     @property
     def is_central_config_done(self) -> bool:

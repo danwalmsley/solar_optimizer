@@ -110,6 +110,8 @@ async def test_central_config_inputs(
         user_input
     )
     await hass.async_block_till_done()
+    if result.get("step_id") == "battery_reserve_review":
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     data = result.get("data")
@@ -167,46 +169,20 @@ async def test_default_values_central_config(
 
     assert data["smooth_production"]
     assert data.get("battery_soc_entity_id") is None
-    assert data.get(CONF_BATTERY_POWER_STRATEGY) == BATTERY_POWER_STRATEGY_EXISTING
-    assert data.get(CONF_BATTERY_BUDGET_START_SOC) == 100
-    assert data.get(CONF_BATTERY_BUDGET_STOP_SOC) == 90
     assert data.get(CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER) == 2700
     assert data.get(CONF_BATTERY_CHARGE_RESERVE_START_SOC) == 50
     assert data.get(CONF_MINIMUM_EXPORT_POWER) == 0
-    assert data.get(CONF_DECISION_REVERSAL_HOLD_SEC) == 0
-    assert data.get(CONF_POWER_DEFICIT_CONFIRMATION_SEC) == 0
+    assert data.get(CONF_SWITCHING_STABILITY_SEC) == 10
 
     assert result["title"] == "Configuration"
 
 
-async def test_invalid_battery_budget_thresholds(
-    hass: HomeAssistant, skip_hass_states_get, reset_coordinator
-):
-    """The close threshold must be lower than the open threshold."""
-    result = await hass.config_entries.flow.async_init(
-        config_flow.DOMAIN, context={"source": "user"}
-    )
-
-    user_input = {
-        CONF_POWER_CONSUMPTION_ENTITY_ID: "input_number.power_consumption",
-        CONF_POWER_PRODUCTION_ENTITY_ID: "input_number.power_production",
-        CONF_SELL_COST_ENTITY_ID: "input_number.sell_cost",
-        CONF_BUY_COST_ENTITY_ID: "input_number.buy_cost",
-        CONF_SELL_TAX_PERCENT_ENTITY_ID: "input_number.tax_percent",
-        CONF_BATTERY_POWER_STRATEGY: BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
-        CONF_BATTERY_BUDGET_START_SOC: 90,
-        CONF_BATTERY_BUDGET_STOP_SOC: 90,
-    }
-
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input=user_input
-    )
-
-    assert result["step_id"] == "device_central"
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"] == {
-        CONF_BATTERY_BUDGET_STOP_SOC: "battery_budget_invalid"
-    }
+def test_obsolete_controls_are_absent():
+    from custom_components.solar_optimizer.config_schema import central_config_schema
+    keys = {str(key) for key in central_config_schema.schema}
+    assert "switching_stability_sec" in keys
+    assert not keys.intersection({"battery_power_strategy", "battery_budget_start_soc",
+        "battery_budget_stop_soc", "decision_reversal_hold_sec", "power_deficit_confirmation_sec"})
 
 
 async def test_battery_charge_reserve_curve_review(
@@ -222,10 +198,9 @@ async def test_battery_charge_reserve_curve_review(
         CONF_SELL_COST_ENTITY_ID: "input_number.sell_cost",
         CONF_BUY_COST_ENTITY_ID: "input_number.buy_cost",
         CONF_SELL_TAX_PERCENT_ENTITY_ID: "input_number.tax_percent",
-        CONF_BATTERY_POWER_STRATEGY: BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
-        CONF_BATTERY_BUDGET_START_SOC: 100,
-        CONF_BATTERY_BUDGET_STOP_SOC: 90,
         CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER: 2700,
+        CONF_BATTERY_SOC_ENTITY_ID: "sensor.battery_soc",
+        CONF_BATTERY_CHARGE_POWER_ENTITY_ID: "sensor.battery_power",
         CONF_BATTERY_CHARGE_RESERVE_START_SOC: 50,
     }
 
@@ -251,7 +226,7 @@ async def test_battery_charge_reserve_curve_review(
 async def test_invalid_battery_charge_reserve_start_soc(
     hass: HomeAssistant, skip_hass_states_get, reset_coordinator
 ):
-    """The taper must start below both battery-budget thresholds."""
+    """The taper must start below full charge."""
     result = await hass.config_entries.flow.async_init(
         config_flow.DOMAIN, context={"source": "user"}
     )
@@ -261,20 +236,11 @@ async def test_invalid_battery_charge_reserve_start_soc(
         CONF_SELL_COST_ENTITY_ID: "input_number.sell_cost",
         CONF_BUY_COST_ENTITY_ID: "input_number.buy_cost",
         CONF_SELL_TAX_PERCENT_ENTITY_ID: "input_number.tax_percent",
-        CONF_BATTERY_POWER_STRATEGY: BATTERY_POWER_STRATEGY_CHARGE_FIRST_WITH_BUDGET,
-        CONF_BATTERY_BUDGET_START_SOC: 100,
-        CONF_BATTERY_BUDGET_STOP_SOC: 90,
-        CONF_BATTERY_CHARGE_RESERVE_START_SOC: 90,
+        CONF_BATTERY_CHARGE_RESERVE_START_SOC: 100,
     }
 
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], user_input=user_input
-    )
-
-    assert result["step_id"] == "device_central"
-    assert result["errors"] == {
-        CONF_BATTERY_CHARGE_RESERVE_START_SOC: "battery_charge_reserve_invalid"
-    }
+    with pytest.raises(InvalidData):
+        await hass.config_entries.flow.async_configure(result["flow_id"], user_input=user_input)
 
 
 async def test_wrong_raz_time(

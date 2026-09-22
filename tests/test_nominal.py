@@ -425,6 +425,7 @@ async def test_negative_or_null_costs(hass: HomeAssistant, init_solar_optimizer_
             "sensor.fake_power_consumption": State("sensor.fake_power_consumption", -1000),
             "sensor.fake_power_production": State("sensor.fake_power_production", 5000),
             "sensor.fake_battery_charge_power": State("sensor.fake_battery_charge_power", 0),
+            "sensor.fake_battery_soc": State("sensor.fake_battery_soc", 100),
             "input_number.fake_sell_cost": State("input_number.fake_sell_cost", sell_cost),
             "input_number.fake_buy_cost": State("input_number.fake_buy_cost", buy_cost),
             "input_number.fake_sell_tax_percent": State("input_number.fake_sell_tax_percent", 0),

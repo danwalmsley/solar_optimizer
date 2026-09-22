@@ -27,7 +27,8 @@
                     "smooth_production": "Lisser la production solaire",
                     "battery_soc_entity_id": "Etat de charge de la batterie",
                     "battery_charge_power_entity_id": "Puissance de charge nette de la batterie",
-                    "raz_time": "Heure de remise à zéro"
+                    "raz_time": "Heure de remise à zéro",
+                    "switching_stability_sec": "Switching stability interval"
                 },
                 "data_description": {
                     "refresh_period_sec": "Période de rafraichissement en secondes. Attention des calculs lourds sont effectués à chaque période. Ne pas rafraichir trop souvent",
@@ -39,8 +40,11 @@
                     "sell_tax_percent_entity_id": "Le pourcentage de taxe de revente de l'énergie (0 à 100)",
                     "smooth_production": "Si coché, la production solaire sera lissée pour éviter les variations brutales",
                     "battery_soc_entity_id": "Etat de charge de la batterie en %. Si vous n'avez pas de batterie, laissez vide",
-                    "battery_charge_power_entity_id": "L'entity_id qui mesure la charger nette de la batterie instantanée. Doit-être exprimé en watts, être positif si la batterie se décharge et négatif si la batterie charge. Laissez vide si vous n'avez pas de batterie solaire.",
-                    "raz_time": "Heure de remise à zéro des compteurs de temps passés. Devrait être avant la première exposition au soleil mais pas trop tôt pour laisser du temps à l'activation de nuit"
+                    "battery_charge_power_entity_id": "Signed battery power in watts: negative charging, positive discharging. Configure both battery power and SOC, or leave both empty without a battery.",
+                    "raz_time": "Heure de remise à zéro des compteurs de temps passés. Devrait être avant la première exposition au soleil mais pas trop tôt pour laisser du temps à l'activation de nuit",
+                    "switching_stability_sec": "Seconds of continuous surplus or shortage before changing a load; also allows commands to settle. Default 10. Hard eligibility stops remain immediate. Set 0 to disable.",
+                    "battery_charge_reserve_start_soc": "The full charging reserve applies up to this SOC, then falls in 10-point steps to 90%, and 5-point steps to zero at 100%.",
+                    "minimum_export_power": "Additional solar headroom reserved after the battery charging reserve; normally 0 W."
                 }
             },
             "device": {
@@ -68,14 +72,14 @@
                     "power_max": "La puissance maximale de l'équipement lorsqu'il est activé",
                     "check_usable_template": "Le template pour vérifier si l'équipement est utilisable. Exemple `True ` ou `states('sensor.my_sensor') | float > 10` (n'oubliez pas les doubles accolades)",
                     "check_active_template": "Le template pour vérifier si un équipement est actif. Laissez le vide pour les simples switch ou apparentés. Exemple `is_state_attr('sensor.my_sensor', 'hvac_mode', 'heat')` (avec les doubles accolades)",
-                    "duration_min": "La durée minimale d'allumage de l'équipement en minutes",
+                    "duration_min": "Preferred minimum run in minutes. Confirmed solar shortages and hard eligibility stops override it; not an equipment-protection guarantee.",
                     "duration_stop_min": "La durée minimale d'extinction de l'équipement en minutes",
                     "action_mode": "Le mode d'action. `service` pour appeler un service ou `event` pour envoyer un événement afin de l'allumer ou de l'éteindre",
                     "activation_service": "Le service pour allumer l'équipement. Exemple `switch/turn_on` ou `climate/set_hvac_mode/hvac_mode:cool`",
                     "deactivation_service": "Le service pour éteindre l'équipement. Exemple `switch/turn_off` ou `climate/set_hvac_mode/hvac_mode:off`. Laissez vide pour les équipements qui se désactivent tout seul",
                     "battery_soc_threshold": "Le seuil de charge de la batterie pour activer l'équipement",
                     "max_on_time_per_day_min": "Le temps maximum par jour en état allumé en minutes. Si le temps minimum n'est pas atteint pendant la journée, il sera activé pendant l'heure creuse à concurrence du temps maximum",
-                    "min_on_time_per_day_min": "Le temps minimum par jour en état allumé en minutes. Si il n'est pas atteint, l'équipement sera activé pendant l'heure creuse",
+                    "min_on_time_per_day_min": "Preferred daily runtime. It cannot force operation without surplus. Use explicit manual/forced operation if grid or battery use is intended.",
                     "offpeak_time": "L'heure de début des heures creuses au format HH:MM"
                 }
             },
@@ -112,7 +116,7 @@
                     "power_step": "Le pas de puissance pour l'équipement",
                     "check_usable_template": "Le template pour vérifier si l'équipement est utilisable. Exemple `True ` ou `states('sensor.my_sensor') | float > 10` (n'oubliez pas les doubles accolades)",
                     "check_active_template": "The template to check if the device is active. Keep it empty for switch type device or apparented. Example `is_state_attr('sensor.my_sensor', 'hvac_mode', 'heat')` (with double accolades)",
-                    "duration_min": "La durée minimale de l'équipement lorsqu'il est allumé en minutes",
+                    "duration_min": "Preferred minimum run in minutes. Confirmed solar shortages and hard eligibility stops override it; not an equipment-protection guarantee.",
                     "duration_stop_min": "La durée minimale de l'équipement lorsqu'il est éteint en minutes",
                     "action_mode": "Le mode d'action. `service` pour appeler un service ou `event` pour envoyer un événement afin de l'allumer ou de l'éteindre",
                     "activation_service": "Le service pour allumer l'équipement. Exemple `switch/turn_on` ou `climate/set_hvac_mode/hvac_mode:cool`",
@@ -123,7 +127,7 @@
                     "convert_power_divide_factor": "Le facteur de division pour convertir la puissance en unités de l'équipement. Si la conversion de la puissance en ampère, le diviseur doit être 220",
                     "battery_soc_threshold": "Le seuil de charge de la batterie pour   activer l'équipement",
                     "max_on_time_per_day_min": "Le temps maximum par jour en état allumé en minutes. Si le temps minimum n'est pas atteint pendant la journée, il sera activé pendant l'heure creuse à concurrence du temps maximum",
-                    "min_on_time_per_day_min": "Le temps minimum par jour en état allumé en minutes. Si il n'est pas atteint, l'équipement sera activé pendant l'heure creuse",
+                    "min_on_time_per_day_min": "Preferred daily runtime. It cannot force operation without surplus. Use explicit manual/forced operation if grid or battery use is intended.",
                     "offpeak_time": "L'heure de début des heures creuses au format HH:MM"
                 }
             }
@@ -159,7 +163,8 @@
                     "smooth_production": "Lisser la production solaire",
                     "battery_soc_entity_id": "Etat de charge de la batterie",
                     "battery_charge_power_entity_id": "Puissance de charge nette de la batterie",
-                    "raz_time": "Heure de remise à zéro"
+                    "raz_time": "Heure de remise à zéro",
+                    "switching_stability_sec": "Switching stability interval"
                 },
                 "data_description": {
                     "refresh_period_sec": "Période de rafraichissement en secondes. Attention des calculs lourds sont effectués à chaque période. Ne pas rafraichir trop souvent",
@@ -171,8 +176,11 @@
                     "sell_tax_percent_entity_id": "Le pourcentage de taxe de revente de l'énergie (0 à 100)",
                     "smooth_production": "Si coché, la production solaire sera lissée pour éviter les variations brutales",
                     "battery_soc_entity_id": "Etat de charge de la batterie en %. Si vous n'avez pas de batterie, laissez vide",
-                    "battery_charge_power_entity_id": "L'entity_id qui mesure la charger nette de la batterie instantanée. Doit-être exprimé en watts, être positif si la batterie se décharge et négatif si la batterie charge. Laissez vide si vous n'avez pas de batterie solaire.",
-                    "raz_time": "Heure de remise à zéro des compteurs de temps passés. Devrait être avant la première exposition au soleil mais pas trop tôt pour laisser du temps à l'activation de nuit"
+                    "battery_charge_power_entity_id": "Signed battery power in watts: negative charging, positive discharging. Configure both battery power and SOC, or leave both empty without a battery.",
+                    "raz_time": "Heure de remise à zéro des compteurs de temps passés. Devrait être avant la première exposition au soleil mais pas trop tôt pour laisser du temps à l'activation de nuit",
+                    "switching_stability_sec": "Seconds of continuous surplus or shortage before changing a load; also allows commands to settle. Default 10. Hard eligibility stops remain immediate. Set 0 to disable.",
+                    "battery_charge_reserve_start_soc": "The full charging reserve applies up to this SOC, then falls in 10-point steps to 90%, and 5-point steps to zero at 100%.",
+                    "minimum_export_power": "Additional solar headroom reserved after the battery charging reserve; normally 0 W."
                 }
             },
             "device": {
@@ -200,14 +208,14 @@
                     "power_max": "La puissance maximale de l'équipement lorsqu'il est activé",
                     "check_usable_template": "Le template pour vérifier si l'équipement est utilisable. Exemple `True ` ou `states('sensor.my_sensor') | float > 10` (n'oubliez pas les doubles accolades)",
                     "check_active_template": "Le template pour vérifier si un équipement est actif. Laissez le vide pour les simples switch ou apparentés. Exemple `is_state_attr('sensor.my_sensor', 'hvac_mode', 'heat')` (avec les doubles accolades)",
-                    "duration_min": "La durée minimale d'allumage de l'équipement en minutes",
+                    "duration_min": "Preferred minimum run in minutes. Confirmed solar shortages and hard eligibility stops override it; not an equipment-protection guarantee.",
                     "duration_stop_min": "La durée minimale d'extinction de l'équipement en minutes",
                     "action_mode": "Le mode d'action. `service` pour appeler un service ou `event` pour envoyer un événement afin de l'allumer ou de l'éteindre",
                     "activation_service": "Le service pour allumer l'équipement. Exemple `switch/turn_on` ou `climate/set_hvac_mode/hvac_mode:cool`",
                     "deactivation_service": "Le service pour éteindre l'équipement. Exemple `switch/turn_off` ou `climate/set_hvac_mode/hvac_mode:off`. Laissez vide pour les équipements qui se désactivent tout seul",
                     "battery_soc_threshold": "Le seuil de charge de la batterie pour activer l'équipement",
                     "max_on_time_per_day_min": "Le temps maximum par jour en état allumé en minutes. Si le temps minimum n'est pas atteint pendant la journée, il sera activé pendant l'heure creuse à concurrence du temps maximum",
-                    "min_on_time_per_day_min": "Le temps minimum par jour en état allumé en minutes. Si il n'est pas atteint, l'équipement sera activé pendant l'heure creuse",
+                    "min_on_time_per_day_min": "Preferred daily runtime. It cannot force operation without surplus. Use explicit manual/forced operation if grid or battery use is intended.",
                     "offpeak_time": "L'heure de début des heures creuses au format HH:MM"
                 }
             },
@@ -244,7 +252,7 @@
                     "power_step": "Le pas de puissance pour l'équipement",
                     "check_usable_template": "Le template pour vérifier si l'équipement est utilisable. Exemple `True ` ou `states('sensor.my_sensor') | float > 10` (n'oubliez pas les doubles accolades)",
                     "check_active_template": "The template to check if the device is active. Keep it empty for switch type device or apparented. Example `is_state_attr('sensor.my_sensor', 'hvac_mode', 'heat')` (with double accolades)",
-                    "duration_min": "La durée minimale de l'équipement lorsqu'il est allumé en minutes",
+                    "duration_min": "Preferred minimum run in minutes. Confirmed solar shortages and hard eligibility stops override it; not an equipment-protection guarantee.",
                     "duration_stop_min": "La durée minimale de l'équipement lorsqu'il est éteint en minutes",
                     "action_mode": "Le mode d'action. `service` pour appeler un service ou `event` pour envoyer un événement afin de l'allumer ou de l'éteindre",
                     "activation_service": "Le service pour allumer l'équipement. Exemple `switch/turn_on` ou `climate/set_hvac_mode/hvac_mode:cool`",
@@ -255,7 +263,7 @@
                     "convert_power_divide_factor": "Le facteur de division pour convertir la puissance en unités de l'équipement. Si la conversion de la puissance en ampère, le diviseur doit être 220",
                     "battery_soc_threshold": "Le seuil de charge de la batterie pour   activer l'équipement",
                     "max_on_time_per_day_min": "Le temps maximum par jour en état allumé en minutes. Si le temps minimum n'est pas atteint pendant la journée, il sera activé pendant l'heure creuse à concurrence du temps maximum",
-                    "min_on_time_per_day_min": "Le temps minimum par jour en état allumé en minutes. Si il n'est pas atteint, l'équipement sera activé pendant l'heure creuse",
+                    "min_on_time_per_day_min": "Preferred daily runtime. It cannot force operation without surplus. Use explicit manual/forced operation if grid or battery use is intended.",
                     "offpeak_time": "L'heure de début des heures creuses au format HH:MM"
                 }
             }

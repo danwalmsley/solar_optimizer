@@ -23,6 +23,8 @@ from homeassistant.helpers.reload import (
 
 
 from .const import (
+    CONF_SWITCHING_STABILITY_SEC,
+    DEFAULT_SWITCHING_STABILITY_SEC,
     DOMAIN,
     PLATFORMS,
     CONFIG_VERSION,
@@ -246,33 +248,39 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await async_setup_entry(hass, entry)
 
 
-# Migration function (not used yet)
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry):
-    """Migrate old entry."""
-    _LOGGER.debug(
-        "Migrating from version %s/%s", config_entry.version, config_entry.minor_version
-    )
+    """Remove old policy modes once; preserve devices, entities, and user reserves."""
+    if config_entry.version > CONFIG_VERSION:
+        return False
+    if config_entry.version == CONFIG_VERSION and config_entry.minor_version < 2:
+        obsolete = {
+            "battery_power_strategy", "battery_budget_start_soc", "battery_budget_stop_soc",
+            "decision_reversal_hold_sec", "power_deficit_confirmation_sec", "battery_budget_active",
+        }
+        def migrate(values):
+            result = {key: value for key, value in values.items() if key not in obsolete}
+            if config_entry.minor_version == 0:
+                for key in (CONF_POWER_MAX, CONF_BATTERY_SOC_THRESHOLD,
+                            CONF_MAX_ON_TIME_PER_DAY_MIN, CONF_MIN_ON_TIME_PER_DAY_MIN):
+                    if key in result:
+                        result[key] = str(result[key])
+            return result
 
-    if config_entry.version == CONFIG_VERSION and config_entry.minor_version == 0:
-        _LOGGER.debug("Migration from version 0 to %s/%s is needed", CONFIG_VERSION, CONFIG_MINOR_VERSION)
-        new = {**config_entry.data}
-        for key in (CONF_POWER_MAX, CONF_BATTERY_SOC_THRESHOLD, CONF_MAX_ON_TIME_PER_DAY_MIN, CONF_MIN_ON_TIME_PER_DAY_MIN):
-            if key in new:
-                new[key] = str(new[key])
-
+        data, options = migrate(config_entry.data), migrate(config_entry.options)
+        if data.get("device_type") == "central_config":
+            data[CONF_SWITCHING_STABILITY_SEC] = DEFAULT_SWITCHING_STABILITY_SEC
+            if options:
+                options[CONF_SWITCHING_STABILITY_SEC] = DEFAULT_SWITCHING_STABILITY_SEC
         hass.config_entries.async_update_entry(
-            config_entry,
-            data=new,
-            version=CONFIG_VERSION,
-            minor_version=CONFIG_MINOR_VERSION,
+            config_entry, data=data, options=options,
+            version=CONFIG_VERSION, minor_version=CONFIG_MINOR_VERSION,
         )
-
-        _LOGGER.info(
-            "Migration to version %s (%s) successful",
-            config_entry.version,
-            config_entry.minor_version,
-        )
-
+        # Retire only diagnostics removed by this release, never user/device entities.
+        from homeassistant.helpers import entity_registry as er
+        registry = er.async_get(hass)
+        for entity in er.async_entries_for_config_entry(registry, config_entry.entry_id):
+            if data.get("device_type") == "central_config" and entity.unique_id in {"solar_optimizer_" + key for key in obsolete}:
+                registry.async_remove(entity.entity_id)
     return True
 
 

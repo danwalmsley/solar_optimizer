@@ -59,38 +59,6 @@ central_config_schema = vol.Schema(
         vol.Optional(CONF_BATTERY_CHARGE_POWER_ENTITY_ID): selector.EntitySelector(
             selector.EntitySelectorConfig(domain=[SENSOR_DOMAIN, INPUT_NUMBER_DOMAIN])
         ),
-        vol.Optional(
-            CONF_BATTERY_POWER_STRATEGY,
-            default=BATTERY_POWER_STRATEGY_EXISTING,
-        ): selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=BATTERY_POWER_STRATEGIES,
-                translation_key="battery_power_strategy",
-                mode="dropdown",
-            )
-        ),
-        vol.Optional(
-            CONF_BATTERY_BUDGET_START_SOC,
-            default=DEFAULT_BATTERY_BUDGET_START_SOC,
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0,
-                max=100,
-                step=1,
-                mode=selector.NumberSelectorMode.BOX,
-            )
-        ),
-        vol.Optional(
-            CONF_BATTERY_BUDGET_STOP_SOC,
-            default=DEFAULT_BATTERY_BUDGET_STOP_SOC,
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0,
-                max=100,
-                step=1,
-                mode=selector.NumberSelectorMode.BOX,
-            )
-        ),
         vol.Required(
             CONF_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
             default=DEFAULT_MAXIMUM_BATTERY_CHARGE_RESERVE_POWER,
@@ -128,26 +96,10 @@ central_config_schema = vol.Schema(
             )
         ),
         vol.Optional(
-            CONF_DECISION_REVERSAL_HOLD_SEC,
-            default=DEFAULT_DECISION_REVERSAL_HOLD_SEC,
+            CONF_SWITCHING_STABILITY_SEC, default=DEFAULT_SWITCHING_STABILITY_SEC,
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(
-                min=0,
-                max=300,
-                step=1,
-                unit_of_measurement="s",
-                mode=selector.NumberSelectorMode.BOX,
-            )
-        ),
-        vol.Optional(
-            CONF_POWER_DEFICIT_CONFIRMATION_SEC,
-            default=DEFAULT_POWER_DEFICIT_CONFIRMATION_SEC,
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=0,
-                max=300,
-                step=1,
-                unit_of_measurement="s",
+                min=0, max=300, step=1, unit_of_measurement="s",
                 mode=selector.NumberSelectorMode.BOX,
             )
         ),

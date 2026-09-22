@@ -498,6 +498,23 @@ class ManagedDevice:
         return result
 
     @property
+    def surplus_stop_reason(self) -> str | None:
+        """Hard eligibility, deliberately independent of minimum-run timers."""
+        if self._on_time_sec >= self.max_on_time_per_day_sec:
+            return "maximum_daily_runtime"
+        if not self._check_usable_template.async_render({}):
+            return "unusable"
+        if (self._battery_soc is not None and self.battery_soc_threshold is not None
+                and self._battery_soc < self.battery_soc_threshold):
+            return "minimum_soc"
+        return None
+
+    @property
+    def power_change_waiting(self) -> bool:
+        """A power-setpoint interval is separate from on/off eligibility."""
+        return self._can_change_power and self.now < self._next_date_available_power
+
+    @property
     def is_usable(self) -> bool:
         """A device is usable for optimisation if the check_usable_template returns true and
         if the device is not waiting for the end of its cycle and if the battery_soc_threshold is >= battery_soc
